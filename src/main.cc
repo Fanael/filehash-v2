@@ -270,7 +270,6 @@ exit_status run_command(const args::list_command& args, const args::common_args&
     constexpr int name_width = 40;
     constexpr int timestamp_width = 22;
 
-    tzset();
     db::database database(args.database_path);
 
     std::cout << std::setw(name_width) << "Snapshot name"
@@ -356,6 +355,7 @@ int main(int argc, char** argv)
     // to be tied to std::cout.
     std::cin.tie(nullptr);
     std::clog.tie(&std::cout);
+    tzset();
 
     std::vector<std::string_view> args(argv, argv + argc);
     return static_cast<int>(filehash::main(args));
