@@ -1,0 +1,5 @@
+option('use_pie', type: 'boolean', value: true)
+option('use_relro', type: 'boolean', value: true)
+option('use_lto', type: 'boolean', value: false)
+option('use_stack_protector', type: 'boolean', value: true)
+option('use_gc_sections', type: 'boolean', value: true)
