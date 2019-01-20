@@ -7,6 +7,10 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
+# In addition, for the avoidance of any doubt, permission is granted to
+# link filehash-v2 with OpenSSL or any other library package and to
+# (re)distribute the binaries produced as the result of such linking.
+#
 # filehash-v2 is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
