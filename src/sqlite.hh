@@ -103,6 +103,8 @@ private:
     friend class connection;
     template <typename...>
     friend class row_cursor;
+    template <typename...>
+    friend class owning_cursor;
 
     explicit statement(sqlite3_stmt* statement) noexcept;
 
@@ -129,7 +131,7 @@ class owning_cursor {
 public:
     using row_type = typename row_cursor<Tags...>::row_type;
 
-    explicit owning_cursor(statement stmt) noexcept;
+    explicit owning_cursor(statement&& stmt);
 
     template <typename T>
     void bind_one(int parameter_id, T&& value);
@@ -261,8 +263,8 @@ void statement::bind_impl(std::index_sequence<Idxs...>, Args&&... args)
 
 
 template <typename... Tags>
-owning_cursor<Tags...>::owning_cursor(statement stmt) noexcept
-    : stmt(std::move(stmt))
+owning_cursor<Tags...>::owning_cursor(statement&& stmt)
+    : stmt([&]{ stmt.check_column_count(sizeof...(Tags)); return std::move(stmt); }())
 {
 }
 
