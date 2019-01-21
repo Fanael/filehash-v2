@@ -7,10 +7,6 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// In addition, for the avoidance of any doubt, permission is granted to
-// link filehash-v2 with OpenSSL or any other library package and to
-// (re)distribute the binaries produced as the result of such linking.
-//
 // filehash-v2 is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -29,7 +25,7 @@
 #include <string_view>
 #include <string>
 #include "inotify.hh"
-#include "sha384.hh"
+#include "blake2sp4.hh"
 
 namespace filehash {
 
@@ -67,8 +63,8 @@ private:
     std::unique_ptr<std::byte[]> buffer;
     db::hash_inserter* inserter;
     inotify notify;
-    sha384 chunk_hash;
-    sha384 file_hash;
+    blake2sp4 chunk_hash;
+    blake2sp4 file_hash;
     std::size_t space_left_in_chunk;
     std::int64_t chunk_id;
     std::int64_t file_id;

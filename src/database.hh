@@ -7,10 +7,6 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// In addition, for the avoidance of any doubt, permission is granted to
-// link filehash-v2 with OpenSSL or any other library package and to
-// (re)distribute the binaries produced as the result of such linking.
-//
 // filehash-v2 is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -26,7 +22,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <string>
-#include "sha384.hh"
+#include "blake2sp4.hh"
 #include "span.hh"
 #include "sqlite.hh"
 
@@ -96,9 +92,9 @@ class hash_inserter {
 public:
     void add_file(std::int64_t file_id, std::string_view path);
     void add_chunk(std::int64_t file_id, std::int64_t chunk_id,
-        const sha384::result_type& chunk_hash);
+        const blake2sp4::result_type& chunk_hash);
     void finalize_file(std::int64_t file_id, const timespec& file_modification_time,
-        const sha384::result_type& file_hash);
+        const blake2sp4::result_type& file_hash);
     void merge_changes();
 private:
     friend class snapshot;

@@ -7,10 +7,6 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// In addition, for the avoidance of any doubt, permission is granted to
-// link filehash-v2 with OpenSSL or any other library package and to
-// (re)distribute the binaries produced as the result of such linking.
-//
 // filehash-v2 is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -18,27 +14,41 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with filehash-v2.  If not, see <https://www.gnu.org/licenses/>.
-#ifndef INCLUDED_07D44930879A48619D8EF581D4AB1B14
-#define INCLUDED_07D44930879A48619D8EF581D4AB1B14
+#ifndef INCLUDED_12D4659F489843B3B0B56F5B2D946597
+#define INCLUDED_12D4659F489843B3B0B56F5B2D946597
 #include <array>
 #include <cstddef>
-#include <openssl/sha.h>
+#include <cstdint>
 
 namespace filehash {
 
 template <typename T>
 class span;
 
-class sha384 {
+class blake2sp4 {
 public:
-    using result_type = std::array<std::byte, 48>;
+    using result_type = std::array<std::byte, 32>;
 
-    sha384() noexcept;
+    blake2sp4() noexcept;
     void reset() noexcept;
     void update(span<const std::byte> bytes) noexcept;
     result_type finalize() noexcept;
 private:
-    SHA512_CTX sha_context;
+    static constexpr std::size_t parallelism_degree = 4;
+    static constexpr std::size_t block_words = 16;
+    static constexpr std::size_t block_bytes = block_words * sizeof(std::uint32_t);
+
+    struct state {
+        std::array<std::uint32_t, 8> words;
+        std::uint64_t total_byte_count;
+    };
+
+    span<std::byte> buffer_free_space() noexcept;
+    void mix_buffer() noexcept;
+
+    std::array<state, parallelism_degree> leaf_states;
+    std::array<std::uint32_t, parallelism_degree * block_words> buffer;
+    std::size_t buffer_byte_position;
 };
 
 } // namespace filehash

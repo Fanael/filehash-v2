@@ -7,10 +7,6 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// In addition, for the avoidance of any doubt, permission is granted to
-// link filehash-v2 with OpenSSL or any other library package and to
-// (re)distribute the binaries produced as the result of such linking.
-//
 // filehash-v2 is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -144,7 +140,7 @@ timespec deserialize_timestamp(span<const std::byte> bytes)
 
 span<const std::byte> verify_hash_size(span<const std::byte> bytes)
 {
-    if(bytes.size_bytes() != sizeof(sha384::result_type)) {
+    if(bytes.size_bytes() != sizeof(blake2sp4::result_type)) {
         throw error("Invalid hash size found in database: " + std::to_string(bytes.size_bytes())
             + " bytes");
     }
@@ -213,7 +209,7 @@ CREATE TABLE paths (
 CREATE TABLE hashes (
     hash_id INTEGER NOT NULL PRIMARY KEY,
     hash BLOB NOT NULL UNIQUE,
-    CONSTRAINT hash_type CHECK(typeof(hash) = 'blob' AND length(hash) = 48)
+    CONSTRAINT hash_type CHECK(typeof(hash) = 'blob' AND length(hash) = 32)
 );)eof");
     connection.execute(R"eof(
 CREATE TABLE snapshot_files (
@@ -412,7 +408,7 @@ void hash_inserter::add_file(std::int64_t file_id, std::string_view path)
 }
 
 void hash_inserter::add_chunk(std::int64_t file_id, std::int64_t chunk_id,
-    const sha384::result_type& chunk_hash)
+    const blake2sp4::result_type& chunk_hash)
 {
     add_chunk_statement.reset();
     add_chunk_statement.bind(file_id, chunk_id, chunk_hash);
@@ -420,7 +416,7 @@ void hash_inserter::add_chunk(std::int64_t file_id, std::int64_t chunk_id,
 }
 
 void hash_inserter::finalize_file(std::int64_t file_id, const timespec& file_modification_time,
-    const sha384::result_type& file_hash)
+    const blake2sp4::result_type& file_hash)
 {
     const auto serialized_modification_time = serialize_timestamp(file_modification_time);
     const auto modification_time_bytes = as_bytes(span(&serialized_modification_time, 1));

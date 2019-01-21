@@ -7,10 +7,6 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# In addition, for the avoidance of any doubt, permission is granted to
-# link filehash-v2 with OpenSSL or any other library package and to
-# (re)distribute the binaries produced as the result of such linking.
-#
 # filehash-v2 is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -18,26 +14,25 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with filehash-v2.  If not, see <https://www.gnu.org/licenses/>.
-project('filehash-v2', 'cpp', version: '0.1', license: 'GPL3+',
+project('filehash-v2', 'cpp', version: '0.2', license: 'GPL3+',
         default_options: ['cpp_std=c++17'],
         meson_version: '>=0.48.0')
 
 cxx = meson.get_compiler('cpp')
 
 boost_dep = dependency('boost')
-openssl_dep = dependency('openssl')
 sqlite_dep = dependency('sqlite3')
 threads_dep = dependency('threads')
 
 sources = [
   'src/arg-parse.cc',
+  'src/blake2sp4.cc',
   'src/compiler.cc',
   'src/database.cc',
   'src/file-descriptor.cc',
   'src/hash-engine.cc',
   'src/inotify.cc',
   'src/main.cc',
-  'src/sha384.cc',
   'src/sqlite.cc',
   'src/syscall-error.cc',
 ]
@@ -128,7 +123,7 @@ if cxx.has_header_symbol('cstddef', '__GLIBCXX__')
 endif
 
 executable('filehash-v2', sources,
-           dependencies: [boost_dep, openssl_dep, sqlite_dep, threads_dep],
+           dependencies: [boost_dep, sqlite_dep, threads_dep],
            install: true,
            gnu_symbol_visibility: 'inlineshidden',
            pie: use_pie,
