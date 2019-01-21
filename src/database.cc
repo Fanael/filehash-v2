@@ -456,13 +456,12 @@ auto diff::get_file_counts() -> file_counts
 SELECT
   COALESCE(SUM(old_s.mod_time = new_s.mod_time), 0) AS same_files,
   COALESCE(SUM(old_s.mod_time <> new_s.mod_time), 0) AS modified_files,
-  COALESCE(SUM(new_s.path_id IS NULL), 0) AS deleted_files,
+  COALESCE(SUM(new_s.mod_time IS NULL), 0) AS deleted_files,
   (SELECT COUNT(*) FROM snapshot_files WHERE snapshot_id = ?) AS old_snapshot_files,
   (SELECT COUNT(*) FROM snapshot_files WHERE snapshot_id = ?) AS new_snapshot_files
 FROM snapshot_files AS old_s
-LEFT JOIN snapshot_files AS new_s ON old_s.path_id = new_s.path_id
-WHERE old_s.snapshot_id = ?1
-  AND new_s.snapshot_id = ?2;)eof");
+LEFT JOIN snapshot_files AS new_s ON new_s.snapshot_id = ?2 AND old_s.path_id = new_s.path_id
+WHERE old_s.snapshot_id = ?1;)eof");
     stmt.bind(old_snapshot_id, new_snapshot_id);
     const auto row = stmt.get_single_row_always(int_tag, int_tag, int_tag, int_tag, int_tag);
     return {
