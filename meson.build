@@ -24,19 +24,6 @@ boost_dep = dependency('boost')
 sqlite_dep = dependency('sqlite3')
 threads_dep = dependency('threads')
 
-sources = [
-  'src/arg-parse.cc',
-  'src/blake2sp4.cc',
-  'src/compiler.cc',
-  'src/database.cc',
-  'src/file-descriptor.cc',
-  'src/file-watcher.cc',
-  'src/hash-engine.cc',
-  'src/main.cc',
-  'src/sqlite.cc',
-  'src/syscall-error.cc',
-]
-
 defines = []
 common_args = []
 link_args = []
@@ -122,25 +109,31 @@ if cxx.has_header_symbol('cstddef', '__GLIBCXX__')
   defines += '-D_GLIBCXX_GTHREAD_USE_WEAK=0'
 endif
 
-conf_data = configuration_data()
+sources = [
+  'src/arg-parse.cc',
+  'src/blake2sp4.cc',
+  'src/compiler.cc',
+  'src/database.cc',
+  'src/file-descriptor.cc',
+  'src/file-watcher-common.cc',
+  'src/hash-engine.cc',
+  'src/main.cc',
+  'src/sqlite.cc',
+  'src/syscall-error.cc',
+]
 
-if get_option('use_dummy_watcher')
-  conf_data.set('FILEHASH_USE_DUMMY_WATCHER', true)
-# NB: need to test for kqueue first because FreeBSD for example has
+# NB: need to test for kqueue before inotify because FreeBSD for example has
 # inotify headers, but inotify fails to link.
+if get_option('use_dummy_watcher')
+  sources += 'src/file-watcher-dummy.cc'
 elif cxx.has_header_symbol('sys/event.h', 'kqueue')
-  conf_data.set('FILEHASH_USE_KQUEUE_WATCHER', true)
+  sources += 'src/file-watcher-kqueue.cc'
 elif cxx.has_header_symbol('sys/inotify.h', 'inotify_init1')
-  conf_data.set('FILEHASH_USE_INOTIFY_WATCHER', true)
+  sources += 'src/file-watcher-inotify.cc'
 else
   error(
     'No file watcher API supported on this system, use -Duse_dummy_watcher=true to build w/o one.')
 endif
-
-configure_file(input: 'src/config.hh.in',
-               output: 'config.hh',
-               configuration: conf_data)
-configuration_dir = include_directories('.')
 
 executable('filehash-v2', sources,
            dependencies: [boost_dep, sqlite_dep, threads_dep],
@@ -148,6 +141,5 @@ executable('filehash-v2', sources,
            gnu_symbol_visibility: 'inlineshidden',
            pie: use_pie,
            implicit_include_directories: false,
-           include_directories: configuration_dir,
            cpp_args: defines + common_args,
            link_args: common_args + link_args)

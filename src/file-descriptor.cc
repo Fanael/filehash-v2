@@ -74,14 +74,14 @@ void file_descriptor::rewind() const
 span<std::byte> file_descriptor::read(span<std::byte> buffer) const
 {
     const auto read_bytes = static_cast<std::size_t>(wrap_syscall<file_error>(
-        [&]{return ::read(descriptor, buffer.data(), buffer.size_bytes());}));
+        [&]{ return ::read(descriptor, buffer.data(), buffer.size_bytes()); }));
     return buffer.first(read_bytes);
 }
 
 std::optional<span<std::byte>> file_descriptor::read_nonblocking(span<std::byte> buffer) const
 {
     const auto read_bytes = wrap_syscall_nonblocking<file_error>(
-        [&]{return ::read(descriptor, buffer.data(), buffer.size_bytes());});
+        [&]{ return ::read(descriptor, buffer.data(), buffer.size_bytes()); });
     return read_bytes
         ? std::optional(buffer.first(static_cast<std::size_t>(*read_bytes)))
         : std::nullopt;

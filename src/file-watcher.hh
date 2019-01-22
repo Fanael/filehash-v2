@@ -22,7 +22,7 @@
 
 namespace filehash {
 
-class file_watcher_error : public syscall_error {
+class watch_error : public syscall_error {
 public:
     using syscall_error::syscall_error;
     const char* what() const noexcept override;

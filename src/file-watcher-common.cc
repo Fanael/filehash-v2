@@ -14,13 +14,19 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with filehash-v2.  If not, see <https://www.gnu.org/licenses/>.
-#ifndef INCLUDED_30E983BE00C54784A53F98C0775AFD14
-#define INCLUDED_30E983BE00C54784A53F98C0775AFD14
+#include "file-watcher.hh"
 
-#mesondefine FILEHASH_USE_DUMMY_WATCHER
+namespace filehash {
 
-#mesondefine FILEHASH_USE_INOTIFY_WATCHER
+const char* watch_error::what() const noexcept
+{
+    return "watch error";
+}
 
-#mesondefine FILEHASH_USE_KQUEUE_WATCHER
 
-#endif
+file_watcher::event::event(const void* data) noexcept
+    : opaque_data(data)
+{
+}
+
+} // namespace filehash
