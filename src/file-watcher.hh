@@ -16,57 +16,62 @@
 // along with filehash-v2.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef INCLUDED_AB77DD0C55DC45AE9885D96DD4ABF08F
 #define INCLUDED_AB77DD0C55DC45AE9885D96DD4ABF08F
-#include <cstdint>
 #include <memory>
-#include <type_traits>
-#include <limits.h>
-#include <sys/inotify.h>
-#include "file-descriptor.hh"
+#include "syscall-error.hh"
 
 namespace filehash {
 
-class inotify_error : public syscall_error {
+class file_watcher_error : public syscall_error {
 public:
     using syscall_error::syscall_error;
     const char* what() const noexcept override;
 };
 
-class inotify {
+class file_watcher {
 public:
     class watch;
+    class event;
 
-    inotify();
-    // We can't easily move this class because it has internal pointers
-    // to the event buffer, and watches keep a pointer to their parent
-    // inotify, so disable move operations.
-    inotify(inotify&&) = delete;
-    inotify& operator=(inotify&&) = delete;
+    file_watcher();
 
-    watch add_watch(const char* path, std::uint32_t mask);
+    watch add_write_watch_for(const char* path, int fd);
     bool events_available() const;
-    const inotify_event& next_event();
+    event next_event();
 private:
-    static constexpr size_t buffer_size = sizeof(inotify_event) + NAME_MAX + 1;
+    class implementation;
 
-    file_descriptor fd;
-    char* next_event_ptr = nullptr;
-    char* events_end = nullptr;
-    std::aligned_storage_t<buffer_size, alignof(inotify_event)> event_buffer;
+    struct deleter {
+        void operator()(implementation* impl) const noexcept;
+    };
+    std::unique_ptr<implementation, deleter> impl;
 };
 
-class inotify::watch {
+class file_watcher::watch {
 public:
     int descriptor() const noexcept;
 private:
-    friend class inotify;
-    watch(inotify& parent, int descriptor) noexcept;
+    friend class implementation;
+    // NB: only a pointer so that the dummy watcher doesn't have to create
+    // an instance, it's meant to be always non-null otherwise.
+    watch(implementation* parent, int descriptor) noexcept;
 
     struct deleter {
-        void operator()(inotify* parent) const noexcept;
+        void operator()(implementation* parent) const noexcept;
 
         int descriptor;
     };
-    std::unique_ptr<inotify, deleter> parent;
+    std::unique_ptr<implementation, deleter> parent;
+};
+
+class file_watcher::event {
+public:
+    int descriptor() const noexcept;
+    bool is_write_event() const noexcept;
+private:
+    friend class implementation;
+    explicit event(const void* data) noexcept;
+
+    const void* opaque_data;
 };
 
 } // namespace filehash

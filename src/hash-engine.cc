@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include "database.hh"
+#include "file-descriptor.hh"
 #include "hash-engine.hh"
 #include "span.hh"
 #include "syscall-utils.hh"
@@ -51,7 +52,6 @@ hash_engine::hash_engine(db::hash_inserter& inserter, std::mutex& output_mutex,
 
 void hash_engine::hash_file(const std::string& file_name)
 {
-    auto watch = notify.add_watch(file_name.c_str(), IN_MODIFY);
     // NB: O_NONBLOCK so that open does not block on FIFOs.
     file_descriptor file(wrap_syscall<file_error>([&]{
         return open(file_name.c_str(), O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
@@ -68,13 +68,14 @@ void hash_engine::hash_file(const std::string& file_name)
         const std::lock_guard guard(*output_mutex);
         *verbose_output << "Hashing file \"" << file_name << "\"\n" << std::flush;
     }
+    const auto watch = watcher.add_write_watch_for(file_name.c_str(), file.fd());
     ++file_id;
     inserter->add_file(file_id, file_name);
     hash_file_loop(file_name, file, watch);
 }
 
 void hash_engine::hash_file_loop(std::string_view file_name, file_descriptor& file,
-    const inotify::watch& watch)
+    const file_watcher::watch& watch)
 {
     for(;;) {
         try {
@@ -90,7 +91,7 @@ void hash_engine::hash_file_loop(std::string_view file_name, file_descriptor& fi
     }
 }
 
-void hash_engine::try_hash_file(file_descriptor& file, const inotify::watch& watch)
+void hash_engine::try_hash_file(file_descriptor& file, const file_watcher::watch& watch)
 {
     reset(file);
     for(;;) {
@@ -144,14 +145,14 @@ void hash_engine::reset(file_descriptor& file)
     file_hash.reset();
 }
 
-void hash_engine::try_detect_modifications(const inotify::watch& watch)
+void hash_engine::try_detect_modifications(const file_watcher::watch& watch)
 {
     bool detected = false;
     // Process all events, in case there are some belated events for files
     // we processed in the past.
-    while(notify.events_available()) {
-        const auto& event = notify.next_event();
-        if(event.wd == watch.descriptor() && (event.mask & IN_MODIFY) != 0) {
+    while(watcher.events_available()) {
+        const auto& event = watcher.next_event();
+        if(event.descriptor() == watch.descriptor() && event.is_write_event()) {
             detected = true;
         }
     }

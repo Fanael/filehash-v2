@@ -24,8 +24,8 @@
 #include <mutex>
 #include <string_view>
 #include <string>
-#include "inotify.hh"
 #include "blake2sp4.hh"
+#include "file-watcher.hh"
 
 namespace filehash {
 
@@ -52,17 +52,17 @@ public:
     void hash_file(const std::string& file_name);
 private:
     void hash_file_loop(std::string_view file_name, file_descriptor& file,
-        const inotify::watch& watch);
-    void try_hash_file(file_descriptor& file, const inotify::watch& watch);
+        const file_watcher::watch& watch);
+    void try_hash_file(file_descriptor& file, const file_watcher::watch& watch);
     void hash_contents(span<const std::byte> data);
     void save_current_chunk();
     void next_chunk() noexcept;
     void reset(file_descriptor& file);
-    void try_detect_modifications(const inotify::watch& watch);
+    void try_detect_modifications(const file_watcher::watch& watch);
 
     std::unique_ptr<std::byte[]> buffer;
     db::hash_inserter* inserter;
-    inotify notify;
+    file_watcher watcher;
     blake2sp4 chunk_hash;
     blake2sp4 file_hash;
     std::size_t space_left_in_chunk;
