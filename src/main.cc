@@ -137,9 +137,9 @@ std::size_t get_thread_count(std::size_t requested_count) noexcept
     }
     const auto hardware_concurrency = std::thread::hardware_concurrency();
     if(hardware_concurrency > 0) {
-        return hardware_concurrency;
+        return 2 * hardware_concurrency;
     }
-    return 1;
+    return 2;
 }
 
 // std::future<void> and std::async would do the same thing, but they bloat

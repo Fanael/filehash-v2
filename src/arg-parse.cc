@@ -449,7 +449,8 @@ Only the contents of regular files are hashed. Directories, symlinks,
 device nodes, etc. will be skipped.
 
 The '--threads' option controls the number of threads used for hashing.
-The default is to use as many threads as there are active CPUs in the system.
+The default is to use a number derived from the number of active CPUs in the
+system.
 
 If the '--verbose' option is present, the name of each file will be printed
 as it is being processed.
