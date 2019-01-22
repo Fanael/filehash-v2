@@ -22,9 +22,15 @@
 namespace filehash {
 
 template <typename Exception>
+[[noreturn]] void throw_syscall_error(int code)
+{
+    throw Exception(code);
+}
+
+template <typename Exception>
 [[noreturn]] void throw_errno()
 {
-    throw Exception(errno);
+    throw_syscall_error<Exception>(errno);
 }
 
 template <typename Exception, typename T>
@@ -52,6 +58,20 @@ template <typename Exception, typename Func>
 decltype(auto) wrap_syscall(Func&& function)
 {
     return throw_errno_if_failed<Exception>(retry_on_eintr(std::forward<Func>(function)));
+}
+
+template <typename Exception, typename Func>
+auto wrap_syscall_nonblocking(Func&& function)
+{
+    auto result = retry_on_eintr(std::forward<Func>(function));
+    if(result != -1) {
+        return std::optional(std::move(result));
+    }
+    const auto error = errno;
+    if(error == EAGAIN || error == EWOULDBLOCK) {
+        return std::optional<decltype(result)>(std::nullopt);
+    }
+    throw_syscall_error<Exception>(error);
 }
 
 } // namespace filehash

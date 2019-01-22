@@ -17,6 +17,7 @@
 #ifndef INCLUDED_AB77DD0C55DC45AE9885D96DD4ABF08F
 #define INCLUDED_AB77DD0C55DC45AE9885D96DD4ABF08F
 #include <memory>
+#include <optional>
 #include "syscall-error.hh"
 
 namespace filehash {
@@ -35,8 +36,7 @@ public:
     file_watcher();
 
     watch add_write_watch_for(const char* path, int fd);
-    bool events_available() const;
-    event next_event();
+    std::optional<event> next_event();
 private:
     class implementation;
 

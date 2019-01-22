@@ -78,12 +78,13 @@ span<std::byte> file_descriptor::read(span<std::byte> buffer) const
     return buffer.first(read_bytes);
 }
 
-bool file_descriptor::input_available() const
+std::optional<span<std::byte>> file_descriptor::read_nonblocking(span<std::byte> buffer) const
 {
-    pollfd pf = {};
-    pf.fd = descriptor;
-    pf.events = POLLIN;
-    return wrap_syscall<file_error>([&]{return poll(&pf, 1, 0);}) > 0;
+    const auto read_bytes = wrap_syscall_nonblocking<file_error>(
+        [&]{return ::read(descriptor, buffer.data(), buffer.size_bytes());});
+    return read_bytes
+        ? std::optional(buffer.first(static_cast<std::size_t>(*read_bytes)))
+        : std::nullopt;
 }
 
 void file_descriptor::drop_o_nonblock() const

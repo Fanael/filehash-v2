@@ -18,8 +18,8 @@
 #include "file-watcher.hh"
 #if defined(FILEHASH_USE_INOTIFY_WATCHER)
 # include <algorithm>
+# include <array>
 # include <cstddef>
-# include <type_traits>
 # include <limits.h>
 # include <sys/inotify.h>
 # include "file-descriptor.hh"
@@ -27,8 +27,6 @@
 # include "syscall-utils.hh"
 #elif defined(FILEHASH_USE_KQUEUE_WATCHER)
 # include <array>
-# include <cassert>
-# include <optional>
 # include <sys/event.h>
 # include <time.h>
 # include "file-descriptor.hh"
@@ -69,22 +67,20 @@ public:
     implementation& operator=(implementation&&) = delete;
 
     watch add_write_watch_for(const char* path, int fd);
-    bool events_available();
-    event next_event();
+    std::optional<event> next_event();
     void remove_watch(int descriptor) noexcept;
 private:
     static constexpr std::size_t buffer_size = std::max(std::size_t{1024},
         sizeof(inotify_event) + NAME_MAX + 1);
 
+    span<const std::byte> remaining_event_bytes;
     file_descriptor inotify_fd;
-    char* next_event_ptr = nullptr;
-    char* events_end = nullptr;
-    std::aligned_storage_t<buffer_size, alignof(inotify_event)> event_buffer;
+    alignas(alignof(inotify_event)) std::array<std::byte, buffer_size> event_buffer;
 };
 
 
 file_watcher::implementation::implementation()
-    : inotify_fd(throw_errno_if_failed<file_watcher_error>(inotify_init1(IN_CLOEXEC)))
+    : inotify_fd(throw_errno_if_failed<file_watcher_error>(inotify_init1(IN_NONBLOCK | IN_CLOEXEC)))
 {
 }
 
@@ -95,24 +91,20 @@ auto file_watcher::implementation::add_write_watch_for(const char* path, int) ->
     return watch(this, wd);
 }
 
-bool file_watcher::implementation::events_available()
+auto file_watcher::implementation::next_event() -> std::optional<event>
 {
-    return next_event_ptr < events_end || translate_exception<file_error>(
-        [&] {return inotify_fd.input_available();});
-}
-
-auto file_watcher::implementation::next_event() -> event
-{
-    if(next_event_ptr >= events_end) {
+    if(remaining_event_bytes.empty()) {
         // No events left in the buffer, need to read more events from the fd.
-        const auto read_data = translate_exception<file_error>([&] {return inotify_fd.read(
-            {reinterpret_cast<std::byte*>(&event_buffer), buffer_size});});
-        next_event_ptr = reinterpret_cast<char*>(read_data.data());
-        events_end = next_event_ptr + read_data.size_bytes();
+        const auto read_data = translate_exception<file_error>(
+            [&] { return inotify_fd.read_nonblocking(event_buffer); });
+        if(!read_data) {
+            return std::nullopt;
+        }
+        remaining_event_bytes = *read_data;
     }
-    const auto event_ptr = reinterpret_cast<const inotify_event*>(next_event_ptr);
-    next_event_ptr += sizeof(inotify_event) + event_ptr->len;
-    return event(event_ptr);
+    const auto ev = reinterpret_cast<const inotify_event*>(remaining_event_bytes.data());
+    remaining_event_bytes = remaining_event_bytes.drop_first(sizeof(inotify_event) + ev->len);
+    return event(ev);
 }
 
 void file_watcher::implementation::remove_watch(int descriptor) noexcept
@@ -145,13 +137,12 @@ public:
     implementation& operator=(implementation&&) = delete;
 
     watch add_write_watch_for(const char* path, int fd);
-    bool events_available();
-    event next_event();
+    std::optional<event> next_event();
     void remove_watch(int descriptor) noexcept;
 private:
     file_descriptor kqueue_fd;
     std::array<struct kevent, 20> event_buffer;
-    span<const struct kevent> current_events;
+    span<const struct kevent> remaining_events;
 };
 
 file_watcher::implementation::implementation()
@@ -168,25 +159,21 @@ auto file_watcher::implementation::add_write_watch_for(const char*, int fd) -> w
     return watch(this, fd);
 }
 
-bool file_watcher::implementation::events_available()
+auto file_watcher::implementation::next_event() -> std::optional<event>
 {
-    if(!current_events.empty()) {
-        return true;
+    if(remaining_events.empty()) {
+        const timespec zero_timeout = {};
+        const auto events_received =
+            static_cast<unsigned>(throw_errno_if_failed<file_watcher_error>(
+                kevent(kqueue_fd.fd(), nullptr, 0, event_buffer.data(),
+                    static_cast<int>(event_buffer.size()), &zero_timeout)));
+        remaining_events = span(event_buffer.data(), events_received);
+        if(events_received == 0) {
+            return std::nullopt;
+        }
     }
-    const timespec zero_timeout = {};
-    const auto events_received =
-        static_cast<unsigned>(throw_errno_if_failed<file_watcher_error>(kevent(
-            kqueue_fd.fd(), nullptr, 0, event_buffer.data(), static_cast<int>(event_buffer.size()),
-            &zero_timeout)));
-    current_events = span(event_buffer.data(), events_received);
-    return events_received > 0;
-}
-
-auto file_watcher::implementation::next_event() -> event
-{
-    assert(!current_events.empty() && "next_event called without any events available");
-    const auto event_ptr = &current_events.front();
-    current_events = current_events.drop_first(1);
+    const auto event_ptr = &remaining_events.front();
+    remaining_events = remaining_events.drop_first(1);
     return event(event_ptr);
 }
 
@@ -228,12 +215,7 @@ auto file_watcher::add_write_watch_for(const char* path, int fd) -> watch
     return impl->add_write_watch_for(path, fd);
 }
 
-bool file_watcher::events_available() const
-{
-    return impl->events_available();
-}
-
-auto file_watcher::next_event() -> event
+auto file_watcher::next_event() -> std::optional<event>
 {
     return impl->next_event();
 }
@@ -262,17 +244,11 @@ void file_watcher::watch::deleter::operator()(implementation* parent) const noex
 class file_watcher::implementation {
 public:
     static watch make_dummy_watch() noexcept;
-    static event make_dummy_event() noexcept;
 };
 
 auto file_watcher::implementation::make_dummy_watch() noexcept -> watch
 {
     return watch(nullptr, 0);
-}
-
-auto file_watcher::implementation::make_dummy_event() noexcept -> event
-{
-    return event(nullptr);
 }
 
 
@@ -285,14 +261,9 @@ auto file_watcher::add_write_watch_for(const char*, int) -> watch
     return implementation::make_dummy_watch();
 }
 
-bool file_watcher::events_available() const
+auto file_watcher::next_event() -> std::optional<event>
 {
-    return false;
-}
-
-auto file_watcher::next_event() -> event
-{
-    return implementation::make_dummy_event();
+    return std::nullopt;
 }
 
 void file_watcher::deleter::operator()(implementation*) const noexcept

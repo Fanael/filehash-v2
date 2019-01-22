@@ -150,9 +150,8 @@ void hash_engine::try_detect_modifications(const file_watcher::watch& watch)
     bool detected = false;
     // Process all events, in case there are some belated events for files
     // we processed in the past.
-    while(watcher.events_available()) {
-        const auto& event = watcher.next_event();
-        if(event.descriptor() == watch.descriptor() && event.is_write_event()) {
+    while(const auto event = watcher.next_event()) {
+        if(event->descriptor() == watch.descriptor() && event->is_write_event()) {
             detected = true;
         }
     }
