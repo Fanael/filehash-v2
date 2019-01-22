@@ -63,6 +63,7 @@ void hash_engine::hash_file(const std::string& file_name)
     // manpage says it might change in the future, so drop it before actually
     // doing something with the file.
     file.drop_o_nonblock();
+    file.fadvise(POSIX_FADV_SEQUENTIAL);
     if(verbose_output != nullptr) {
         const std::lock_guard guard(*output_mutex);
         *verbose_output << "Hashing file \"" << file_name << "\"\n" << std::flush;

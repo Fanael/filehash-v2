@@ -17,6 +17,7 @@
 #ifndef INCLUDED_22B04CB697ED4FA7971F1935FF42E771
 #define INCLUDED_22B04CB697ED4FA7971F1935FF42E771
 #include <cstddef>
+#include <sys/types.h>
 #include "syscall-error.hh"
 
 struct stat;
@@ -46,6 +47,7 @@ public:
     span<std::byte> read(span<std::byte> buffer) const;
     bool input_available() const;
     void drop_o_nonblock() const;
+    void fadvise(int mode, off_t offset = 0, off_t len = 0) const;
 private:
     int descriptor;
 };

@@ -93,4 +93,10 @@ void file_descriptor::drop_o_nonblock() const
     throw_errno_if_failed<file_error>(fcntl(descriptor, F_SETFL, new_flags));
 }
 
+void file_descriptor::fadvise(int mode, off_t offset, off_t len) const
+{
+    // Don't check for errors because it's only a hint.
+    posix_fadvise(descriptor, offset, len, mode);
+}
+
 } // namespace filehash
