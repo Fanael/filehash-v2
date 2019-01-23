@@ -15,8 +15,10 @@
 // You should have received a copy of the GNU General Public License
 // along with filehash-v2.  If not, see <https://www.gnu.org/licenses/>.
 #include <array>
+#include <atomic>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <iomanip>
 #include <iostream>
@@ -31,11 +33,10 @@
 #include <string.h>
 #include <time.h>
 #include "arg-parse.hh"
+#include "blake2sp4.hh"
 #include "database.hh"
 #include "hash-engine.hh"
 #include "main.hh"
-
-#include "blake2sp4.hh"
 #include "span.hh"
 #include "sqlite.hh"
 #include "syscall-error.hh"
@@ -97,6 +98,9 @@ struct shared_state {
     std::mutex* input_mutex;
     std::ostream* verbose_output;
     std::ostream* error_output;
+    // It's only used as a counter, it doesn't protect anything, so relaxed
+    // operations are fine.
+    mutable std::atomic<std::uint_least64_t> file_error_count;
 };
 
 void get_file_name(std::string& destination, const shared_state& shared)
@@ -123,6 +127,7 @@ void hashing_worker(db::hash_inserter& inserter, const shared_state& shared)
             *shared.error_output << '"' << file_name << "\" is not a regular file, skipping\n"
                 << std::flush;
         } catch(const syscall_error& e) {
+            shared.file_error_count.fetch_add(1, std::memory_order_relaxed);
             const std::lock_guard guard(*shared.output_mutex);
             *shared.error_output << "Error processing file \"" << file_name << "\": " << e.what()
                 << ": " << strerror(e.code()) << '\n' << std::flush;
@@ -177,7 +182,7 @@ void worker::join()
     }
 }
 
-void run_hashing_workers(db::snapshot& snapshot, const args::common_args& common_args)
+exit_status run_hashing_workers(db::snapshot& snapshot, const args::common_args& common_args)
 {
     const auto worker_count = get_thread_count(common_args.thread_count);
     // Let every worker have their own inserter that stores data in a separate
@@ -191,7 +196,7 @@ void run_hashing_workers(db::snapshot& snapshot, const args::common_args& common
     std::mutex output_mutex;
     std::mutex input_mutex;
     const shared_state shared = {common_args.verbose, &output_mutex, &input_mutex, &std::cout,
-        &std::clog};
+        &std::clog, 0};
     std::vector<worker> workers;
     workers.reserve(worker_count);
     for(std::size_t i = 0; i < worker_count; ++i) {
@@ -208,6 +213,12 @@ void run_hashing_workers(db::snapshot& snapshot, const args::common_args& common
     for(auto& inserter: inserters) {
         inserter.merge_changes();
     }
+    const auto file_error_count = shared.file_error_count.load(std::memory_order_relaxed);
+    if(file_error_count > 0) {
+        *shared.error_output << "Warning: " << file_error_count << " files failed to process.\n";
+        return exit_status::harmless_error;
+    }
+    return exit_status::success;
 }
 
 
@@ -290,9 +301,9 @@ exit_status run_command(const args::new_command& args, const args::common_args& 
 {
     db::database database(args.database_path);
     auto snapshot = database.create_empty_snapshot(args.snapshot_name);
-    run_hashing_workers(snapshot, common_args);
+    const auto status = run_hashing_workers(snapshot, common_args);
     database.save_changes();
-    return exit_status::success;
+    return status;
 }
 
 exit_status run_command(const args::new_empty_command& args, const args::common_args&)
@@ -318,9 +329,9 @@ exit_status run_command(const args::update_command& args, const args::common_arg
 {
     db::database database(args.database_path);
     auto snapshot = database.open_snapshot(args.snapshot_name);
-    run_hashing_workers(snapshot, common_args);
+    const auto status = run_hashing_workers(snapshot, common_args);
     database.save_changes();
-    return exit_status::success;
+    return status;
 }
 
 exit_status main(span<const std::string_view> args)

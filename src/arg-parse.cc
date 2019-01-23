@@ -448,6 +448,10 @@ UTF-8 strings separated by null characters (U+0000 NULL).
 Only the contents of regular files are hashed. Directories, symlinks,
 device nodes, etc. will be skipped.
 
+If processing of any file fails, the error will be logged and the process
+will continue. This situation is treated as a harmless error for the purpose
+of determining the exit code.
+
 The '--threads' option controls the number of threads used for hashing.
 The default is to use a number derived from the number of active CPUs in the
 system.
@@ -505,6 +509,10 @@ will be OVERWRITTEN.
 
 Only the contents of regular files are hashed. Directories, symlinks,
 device nodes, etc. will be skipped.
+
+If processing of any file fails, the error will be logged and the process
+will continue. This situation is treated as a harmless error for the purpose
+of determining the exit code.
 
 The '--threads' option controls the number of threads used for hashing.
 The default is to use as many threads as there are active CPUs in the system.
