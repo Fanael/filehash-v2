@@ -258,8 +258,9 @@ void database::vacuum()
     connection.execute("CREATE INDEX snapshot_file_paths ON snapshot_files(path_id);");
     connection.execute("CREATE INDEX snapshot_file_hashes ON snapshot_files(hash_id);");
     connection.execute("CREATE INDEX file_chunk_hashes ON file_chunks(hash_id);");
-    connection.execute("DELETE FROM hashes WHERE hash_id NOT IN "
-        "(SELECT hash_id FROM snapshot_files UNION ALL SELECT hash_id FROM file_chunks);");
+    connection.execute("DELETE FROM hashes "
+        "WHERE hash_id NOT IN (SELECT hash_id FROM snapshot_files) "
+        "  AND hash_id NOT IN (SELECT hash_id FROM file_chunks);");
     // NB: not needed to read file_chunks.path_id because it's a part
     // of a foreign key against snapshot_files anyway.
     connection.execute(
