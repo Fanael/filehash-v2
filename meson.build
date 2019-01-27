@@ -97,10 +97,11 @@ if get_option('use_gc_sections')
   endif
 endif
 
+defines += '-D_FILE_OFFSET_BITS=64'
+defines += '-D_FORTIFY_SOURCE=2'
+
 if cxx.has_header_symbol('features.h', '__GLIBC__')
-  defines += '-D_FILE_OFFSET_BITS=64'
   defines += '-D_GNU_SOURCE'
-  defines += '-D_FORTIFY_SOURCE=2'
 endif
 
 if cxx.has_header_symbol('cstddef', '__GLIBCXX__')
