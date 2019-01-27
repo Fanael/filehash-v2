@@ -122,10 +122,12 @@ sources = [
   'src/syscall-error.cc',
 ]
 
+conf_data = configuration_data()
+
 # NB: need to test for kqueue before inotify because FreeBSD for example has
 # inotify headers, but inotify fails to link.
 if get_option('use_dummy_watcher')
-  sources += 'src/file-watcher-dummy.cc'
+  conf_data.set('FILEHASH_DUMMY_WATCHER_ONLY', true)
 elif cxx.has_header_symbol('sys/event.h', 'kqueue')
   sources += 'src/file-watcher-kqueue.cc'
 elif cxx.has_header_symbol('sys/inotify.h', 'inotify_init1')
@@ -135,11 +137,20 @@ else
     'No file watcher API supported on this system, use -Duse_dummy_watcher=true to build w/o one.')
 endif
 
+# It's always provided as an alternative.
+sources += 'src/file-watcher-dummy.cc'
+
+configure_file(input: 'src/config.hh.in',
+               output: 'config.hh',
+               configuration: conf_data)
+configuration_dir = include_directories('.')
+
 executable('filehash-v2', sources,
            dependencies: [boost_dep, sqlite_dep, threads_dep],
            install: true,
            gnu_symbol_visibility: 'inlineshidden',
            pie: use_pie,
            implicit_include_directories: false,
+           include_directories: configuration_dir,
            cpp_args: defines + common_args,
            link_args: common_args + link_args)

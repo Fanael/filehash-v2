@@ -115,6 +115,7 @@ using command = std::variant<
 struct common_args {
     std::size_t thread_count = 0;
     bool verbose = false;
+    bool use_watcher = true;
 };
 
 struct args {

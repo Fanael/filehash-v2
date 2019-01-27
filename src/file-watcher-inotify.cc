@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <limits.h>
 #include <sys/inotify.h>
 #include "file-descriptor.hh"
@@ -37,20 +38,17 @@ decltype(auto) translate_exception(Func function)
     }
 }
 
-} // unnamed namespace
-
-class file_watcher::implementation {
+class file_watcher_inotify final : public file_watcher {
 public:
-    implementation();
-    // We don't want to move objects of this class ever, because watches
-    // we create contain parent pointers to their creators.
-    implementation(implementation&&) = delete;
-    implementation& operator=(implementation&&) = delete;
+    file_watcher_inotify();
 
-    watch add_write_watch_for(const char* path);
-    std::optional<event> next_event();
+    watch add_write_watch_for(const char* path, int) override;
+    std::optional<event> next_event() override;
 private:
-    friend class watch;
+    void delete_watch(int descriptor) noexcept override;
+    int event_descriptor(const void* event_pointer) const noexcept override;
+    bool event_is_write(const void* event_pointer) const noexcept override;
+
     static constexpr std::size_t buffer_size = std::max(std::size_t{1024},
         sizeof(inotify_event) + NAME_MAX + 1);
 
@@ -60,19 +58,19 @@ private:
 };
 
 
-file_watcher::implementation::implementation()
+file_watcher_inotify::file_watcher_inotify()
     : inotify_fd(throw_errno_if_failed<watch_error>(inotify_init1(IN_NONBLOCK | IN_CLOEXEC)))
 {
 }
 
-auto file_watcher::implementation::add_write_watch_for(const char* path) -> watch
+auto file_watcher_inotify::add_write_watch_for(const char* path, int) -> watch
 {
     const int wd = throw_errno_if_failed<watch_error>(
         inotify_add_watch(inotify_fd.fd(), path, IN_MODIFY));
-    return watch(this, wd);
+    return watch(*this, wd, access_token{});
 }
 
-auto file_watcher::implementation::next_event() -> std::optional<event>
+auto file_watcher_inotify::next_event() -> std::optional<event>
 {
     if(remaining_event_bytes.empty()) {
         // No events left in the buffer, need to read more events from the fd.
@@ -85,57 +83,29 @@ auto file_watcher::implementation::next_event() -> std::optional<event>
     }
     const auto ev = reinterpret_cast<const inotify_event*>(remaining_event_bytes.data());
     remaining_event_bytes = remaining_event_bytes.drop_first(sizeof(inotify_event) + ev->len);
-    return event(ev);
+    return event(*this, ev, access_token{});
 }
 
-
-file_watcher::file_watcher()
-    // Cannot use make_unique here because this unique_ptr has a custom
-    // deleter.
-    : impl(new implementation)
+void file_watcher_inotify::delete_watch(int descriptor) noexcept
 {
+    inotify_rm_watch(inotify_fd.fd(), descriptor);
 }
 
-auto file_watcher::add_write_watch_for(const char* path, int) -> watch
+int file_watcher_inotify::event_descriptor(const void* event_pointer) const noexcept
 {
-    return impl->add_write_watch_for(path);
+    return static_cast<const inotify_event*>(event_pointer)->wd;
 }
 
-auto file_watcher::next_event() -> std::optional<event>
+bool file_watcher_inotify::event_is_write(const void* event_pointer) const noexcept
 {
-    return impl->next_event();
+    return (static_cast<const inotify_event*>(event_pointer)->mask & IN_MODIFY) != 0;
 }
 
-void file_watcher::deleter::operator()(implementation* impl) const noexcept
+} // unnamed namespace
+
+std::unique_ptr<file_watcher> make_system_watcher()
 {
-    delete impl;
-}
-
-
-int file_watcher::watch::descriptor() const noexcept
-{
-    return parent.get_deleter().descriptor;
-}
-
-file_watcher::watch::watch(implementation* parent, int descriptor) noexcept
-    : parent(parent, {descriptor})
-{
-}
-
-void file_watcher::watch::deleter::operator()(implementation* parent) const noexcept
-{
-    inotify_rm_watch(parent->inotify_fd.fd(), descriptor);
-}
-
-
-int file_watcher::event::descriptor() const noexcept
-{
-    return static_cast<const inotify_event*>(opaque_data)->wd;
-}
-
-bool file_watcher::event::is_write_event() const noexcept
-{
-    return (static_cast<const inotify_event*>(opaque_data)->mask & IN_MODIFY) != 0;
+    return std::make_unique<file_watcher_inotify>();
 }
 
 } // namespace filehash

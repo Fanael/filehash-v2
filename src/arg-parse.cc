@@ -223,6 +223,12 @@ void set_verbose(common_args& destination, std::string_view)
     destination.verbose = true;
 }
 
+void unset_use_watcher(common_args& destination, std::string_view)
+{
+    destination.use_watcher = false;
+}
+
+
 struct option_spec {
     std::string_view name;
     bool wants_arg;
@@ -232,6 +238,8 @@ struct option_spec {
 
 constexpr const option_spec option_specs[] = {
     {"help", false, show_help_message, "Show this message"},
+    {"no-watcher", false, unset_use_watcher,
+        "Disable watching for file changes done by other programs"},
     {"threads", true, set_thread_count, "Number of worker threads, or 0 for default"},
     {"verbose", false, set_verbose, "Enable verbose messages"},
 };

@@ -35,6 +35,7 @@
 #include "arg-parse.hh"
 #include "blake2sp4.hh"
 #include "database.hh"
+#include "file-watcher.hh"
 #include "hash-engine.hh"
 #include "main.hh"
 #include "span.hh"
@@ -92,44 +93,92 @@ std::ostream& operator<<(std::ostream& stream, hex_byte_formatter formatter)
 }
 
 
-struct shared_state {
+class shared_state {
+public:
+    explicit shared_state(bool verbose, file_watcher_factory watcher_factory) noexcept;
+
+    void get_next_file_name(std::string& destination) const;
+    const file_watcher_factory& watcher_factory() const noexcept;
+    std::mutex& output_mutex() const noexcept;
+    std::ostream& error_output() const noexcept;
+    std::ostream* verbose_output() const noexcept;
+    void increment_error_counter() const noexcept;
+    std::uint_least64_t get_error_counter() const noexcept;
+private:
     bool verbose;
-    std::mutex* output_mutex;
-    std::mutex* input_mutex;
-    std::ostream* verbose_output;
-    std::ostream* error_output;
+    file_watcher_factory watcher_factory_;
+    mutable std::mutex output_mutex_;
+    mutable std::mutex input_mutex;
     // It's only used as a counter, it doesn't protect anything, so relaxed
     // operations are fine.
     mutable std::atomic<std::uint_least64_t> file_error_count;
 };
 
-void get_file_name(std::string& destination, const shared_state& shared)
+shared_state::shared_state(bool verbose, file_watcher_factory watcher_factory) noexcept
+    : verbose(verbose),
+      watcher_factory_(std::move(watcher_factory)),
+      file_error_count(0)
+{
+}
+
+void shared_state::get_next_file_name(std::string& destination) const
 {
     destination.clear();
-    const std::lock_guard guard(*shared.input_mutex);
+    const std::lock_guard guard(input_mutex);
     std::getline(std::cin, destination, '\0');
 }
 
+const file_watcher_factory& shared_state::watcher_factory() const noexcept
+{
+    return watcher_factory_;
+}
+
+std::mutex& shared_state::output_mutex() const noexcept
+{
+    return output_mutex_;
+}
+
+std::ostream& shared_state::error_output() const noexcept
+{
+    return std::clog;
+}
+
+std::ostream* shared_state::verbose_output() const noexcept
+{
+    return verbose ? &std::cout : nullptr;
+}
+
+void shared_state::increment_error_counter() const noexcept
+{
+    file_error_count.fetch_add(1, std::memory_order_relaxed);
+}
+
+std::uint_least64_t shared_state::get_error_counter() const noexcept
+{
+    return file_error_count.load(std::memory_order_relaxed);
+}
+
+
 void hashing_worker(db::hash_inserter& inserter, const shared_state& shared)
 {
-    hash_engine engine(inserter, *shared.output_mutex,
-        shared.verbose ? shared.verbose_output : nullptr, *shared.error_output);
+    hash_engine engine(inserter, shared.output_mutex(), shared.verbose_output(),
+        shared.error_output(), shared.watcher_factory());
     std::string file_name;
     for(;;) {
-        get_file_name(file_name, shared);
+        shared.get_next_file_name(file_name);
         if(file_name.empty()) {
             break;
         }
         try {
             engine.hash_file(file_name);
         } catch(const not_regular_file_error&) {
-            const std::lock_guard guard(*shared.output_mutex);
-            *shared.error_output << '"' << file_name << "\" is not a regular file, skipping\n"
+            const std::lock_guard guard(shared.output_mutex());
+            shared.error_output() << '"' << file_name << "\" is not a regular file, skipping\n"
                 << std::flush;
         } catch(const syscall_error& e) {
-            shared.file_error_count.fetch_add(1, std::memory_order_relaxed);
-            const std::lock_guard guard(*shared.output_mutex);
-            *shared.error_output << "Error processing file \"" << file_name << "\": " << e.what()
+            shared.increment_error_counter();
+            const std::lock_guard guard(shared.output_mutex());
+            shared.error_output() << "Error processing file \"" << file_name << "\": " << e.what()
                 << ": " << strerror(e.code()) << '\n' << std::flush;
         }
     }
@@ -182,6 +231,11 @@ void worker::join()
     }
 }
 
+file_watcher_factory get_file_watcher_factory(const args::common_args& common_args)
+{
+    return common_args.use_watcher ? make_system_watcher : make_dummy_watcher;
+}
+
 exit_status run_hashing_workers(db::snapshot& snapshot, const args::common_args& common_args)
 {
     const auto worker_count = get_thread_count(common_args.thread_count);
@@ -193,10 +247,7 @@ exit_status run_hashing_workers(db::snapshot& snapshot, const args::common_args&
         inserters.push_back(snapshot.start_update(i));
     }
 
-    std::mutex output_mutex;
-    std::mutex input_mutex;
-    const shared_state shared = {common_args.verbose, &output_mutex, &input_mutex, &std::cout,
-        &std::clog, 0};
+    const shared_state shared(common_args.verbose, get_file_watcher_factory(common_args));
     std::vector<worker> workers;
     workers.reserve(worker_count);
     for(std::size_t i = 0; i < worker_count; ++i) {
@@ -213,9 +264,9 @@ exit_status run_hashing_workers(db::snapshot& snapshot, const args::common_args&
     for(auto& inserter: inserters) {
         inserter.merge_changes();
     }
-    const auto file_error_count = shared.file_error_count.load(std::memory_order_relaxed);
+    const auto file_error_count = shared.get_error_counter();
     if(file_error_count > 0) {
-        *shared.error_output << "Warning: " << file_error_count << " files failed to process.\n";
+        shared.error_output() << "Warning: " << file_error_count << " files failed to process.\n";
         return exit_status::harmless_error;
     }
     return exit_status::success;

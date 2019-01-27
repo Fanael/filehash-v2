@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <iosfwd>
 #include <memory>
 #include <mutex>
@@ -44,10 +45,13 @@ class not_regular_file_error final : public std::exception {};
 
 constexpr std::size_t chunk_size = 1048576;
 
+using file_watcher_factory = std::function<std::unique_ptr<file_watcher> ()>;
+
 class hash_engine {
 public:
     explicit hash_engine(db::hash_inserter& inserter, std::mutex& output_mutex,
-        std::ostream* verbose_output, std::ostream& error_output);
+        std::ostream* verbose_output, std::ostream& error_output,
+        const file_watcher_factory& watcher_factory);
 
     void hash_file(const std::string& file_name);
 private:
@@ -62,7 +66,7 @@ private:
 
     std::unique_ptr<std::byte[]> buffer;
     db::hash_inserter* inserter;
-    file_watcher watcher;
+    std::unique_ptr<file_watcher> watcher;
     blake2sp4 chunk_hash;
     blake2sp4 file_hash;
     std::size_t space_left_in_chunk;

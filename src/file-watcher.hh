@@ -33,46 +33,54 @@ public:
     class watch;
     class event;
 
-    file_watcher();
+    // Most implementations can't be moved because of internal pointers,
+    // and this class is meant to be used only through a pointer or
+    // a reference anyway, so disable copies and moves here.
+    file_watcher(const file_watcher&) = delete;
+    file_watcher(file_watcher&&) = delete;
+    file_watcher& operator=(const file_watcher&) = delete;
+    file_watcher& operator=(file_watcher&&) = delete;
+    virtual ~file_watcher() noexcept;
 
-    watch add_write_watch_for(const char* path, int fd);
-    std::optional<event> next_event();
+    virtual watch add_write_watch_for(const char* path, int fd) = 0;
+    virtual std::optional<event> next_event() = 0;
+protected:
+    struct access_token {};
+
+    file_watcher() noexcept = default;
 private:
-    class implementation;
-
-    struct deleter {
-        void operator()(implementation* impl) const noexcept;
-    };
-    std::unique_ptr<implementation, deleter> impl;
+    virtual void delete_watch(int descriptor) noexcept = 0;
+    virtual int event_descriptor(const void* event_pointer) const noexcept = 0;
+    virtual bool event_is_write(const void* event_pointer) const noexcept = 0;
 };
 
 class file_watcher::watch {
 public:
+    watch(file_watcher& parent, int descriptor, access_token) noexcept;
+
     int descriptor() const noexcept;
 private:
-    friend class implementation;
-    // NB: only a pointer so that the dummy watcher doesn't have to create
-    // an instance, it's meant to be always non-null otherwise.
-    watch(implementation* parent, int descriptor) noexcept;
-
     struct deleter {
-        void operator()(implementation* parent) const noexcept;
+        void operator()(file_watcher* parent) const noexcept;
 
         int descriptor;
     };
-    std::unique_ptr<implementation, deleter> parent;
+    std::unique_ptr<file_watcher, deleter> parent;
 };
 
 class file_watcher::event {
 public:
+    explicit event(file_watcher& parent, const void* data, access_token) noexcept;
+
     int descriptor() const noexcept;
     bool is_write_event() const noexcept;
 private:
-    friend class implementation;
-    explicit event(const void* data) noexcept;
-
+    file_watcher* parent;
     const void* opaque_data;
 };
+
+std::unique_ptr<file_watcher> make_system_watcher();
+std::unique_ptr<file_watcher> make_dummy_watcher();
 
 } // namespace filehash
 #endif

@@ -38,9 +38,11 @@ class concurrent_modification_error final : public std::exception {};
 } // unnamed namespace
 
 hash_engine::hash_engine(db::hash_inserter& inserter, std::mutex& output_mutex,
-    std::ostream* verbose_output, std::ostream& error_output)
+    std::ostream* verbose_output, std::ostream& error_output,
+    const file_watcher_factory& watcher_factory)
     : buffer(new std::byte[buffer_size]),
       inserter(&inserter),
+      watcher(watcher_factory()),
       space_left_in_chunk(chunk_size),
       chunk_id(0),
       file_id(0),
@@ -68,7 +70,7 @@ void hash_engine::hash_file(const std::string& file_name)
         const std::lock_guard guard(*output_mutex);
         *verbose_output << "Hashing file \"" << file_name << "\"\n" << std::flush;
     }
-    const auto watch = watcher.add_write_watch_for(file_name.c_str(), file.fd());
+    const auto watch = watcher->add_write_watch_for(file_name.c_str(), file.fd());
     ++file_id;
     inserter->add_file(file_id, file_name);
     hash_file_loop(file_name, file, watch);
@@ -150,7 +152,7 @@ void hash_engine::try_detect_modifications(const file_watcher::watch& watch)
     bool detected = false;
     // Process all events, in case there are some belated events for files
     // we processed in the past.
-    while(const auto event = watcher.next_event()) {
+    while(const auto event = watcher->next_event()) {
         if(event->descriptor() == watch.descriptor() && event->is_write_event()) {
             detected = true;
         }

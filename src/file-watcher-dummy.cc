@@ -14,63 +14,61 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with filehash-v2.  If not, see <https://www.gnu.org/licenses/>.
+#include <memory>
+#include "config.hh"
 #include "file-watcher.hh"
 
 namespace filehash {
+namespace {
 
-class file_watcher::implementation {
+class file_watcher_dummy final : public file_watcher {
 public:
-    static watch make_dummy_watch() noexcept;
+    file_watcher_dummy() noexcept = default;
+
+    watch add_write_watch_for(const char*, int) noexcept override;
+    std::optional<event> next_event() noexcept override;
+private:
+    void delete_watch(int) noexcept override;
+    int event_descriptor(const void*) const noexcept override;
+    bool event_is_write(const void*) const noexcept override;
 };
 
-auto file_watcher::implementation::make_dummy_watch() noexcept -> watch
+auto file_watcher_dummy::add_write_watch_for(const char*, int) noexcept -> watch
 {
-    return watch(nullptr, 0);
+    return watch(*this, -1, access_token());
 }
 
-
-file_watcher::file_watcher()
-{
-}
-
-auto file_watcher::add_write_watch_for(const char*, int) -> watch
-{
-    return implementation::make_dummy_watch();
-}
-
-auto file_watcher::next_event() -> std::optional<event>
+auto file_watcher_dummy::next_event() noexcept -> std::optional<event>
 {
     return std::nullopt;
 }
 
-void file_watcher::deleter::operator()(implementation*) const noexcept
+void file_watcher_dummy::delete_watch(int) noexcept
 {
 }
 
-
-int file_watcher::watch::descriptor() const noexcept
-{
-    return -1;
-}
-
-file_watcher::watch::watch(implementation*, int) noexcept
-    : parent(nullptr, {0})
-{
-}
-
-void file_watcher::watch::deleter::operator()(implementation*) const noexcept
-{
-}
-
-
-int file_watcher::event::descriptor() const noexcept
+int file_watcher_dummy::event_descriptor(const void*) const noexcept
 {
     return -1;
 }
 
-bool file_watcher::event::is_write_event() const noexcept
+bool file_watcher_dummy::event_is_write(const void*) const noexcept
 {
     return false;
+}
+
+} // unnamed namespace
+
+#ifdef FILEHASH_DUMMY_WATCHER_ONLY
+std::unique_ptr<file_watcher> make_system_watcher()
+{
+    return std::make_unique<file_watcher_dummy>();
+}
+#endif
+
+std::unique_ptr<file_watcher> make_dummy_watcher()
+{
+    return std::make_unique<file_watcher_dummy>();
 }
 
 } // namespace filehash
