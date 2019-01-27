@@ -85,6 +85,10 @@ if get_option('use_stack_protector')
   endif
 endif
 
+if cxx.has_argument('-fstack-clash-protection')
+  common_args += '-fstack-clash-protection'
+endif
+
 if get_option('use_gc_sections')
   if cxx.has_link_argument('-Wl,--gc-sections')
     link_args += '-Wl,--gc-sections'
