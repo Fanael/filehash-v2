@@ -155,7 +155,7 @@ public:
     std::int64_t last_insert_rowid() const noexcept;
     int change_count() const noexcept;
     bool transaction_pending() const noexcept;
-    transaction begin_transaction();
+    [[nodiscard]] transaction begin_transaction();
     statement prepare(std::string_view sql);
     void execute(std::string_view sql);
 private:

@@ -385,7 +385,7 @@ exit_status run_command(const args::update_command& args, const args::common_arg
     return status;
 }
 
-exit_status main(span<const std::string_view> args)
+[[nodiscard]] exit_status main(span<const std::string_view> args)
 {
     try {
         auto parsed_args = args::parse_args(args);

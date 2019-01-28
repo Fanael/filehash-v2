@@ -62,15 +62,15 @@ public:
     constexpr const_reverse_iterator crend() const noexcept;
 
     constexpr pointer data() const noexcept;
-    constexpr bool empty() const noexcept;
+    [[nodiscard]] constexpr bool empty() const noexcept;
     constexpr size_type size() const noexcept;
     constexpr size_type size_bytes() const noexcept;
     constexpr reference operator[](size_type index) const noexcept;
     constexpr reference front() const noexcept;
     constexpr reference back() const noexcept;
 
-    constexpr span first(size_type how_many) const noexcept;
-    constexpr span drop_first(size_type how_many) const noexcept;
+    [[nodiscard]] constexpr span first(size_type how_many) const noexcept;
+    [[nodiscard]] constexpr span drop_first(size_type how_many) const noexcept;
 private:
     T* data_begin = nullptr;
     T* data_end = nullptr;

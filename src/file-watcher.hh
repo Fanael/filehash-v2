@@ -54,7 +54,7 @@ private:
     virtual bool event_is_write(const void* event_pointer) const noexcept = 0;
 };
 
-class file_watcher::watch {
+class [[nodiscard]] file_watcher::watch {
 public:
     watch(file_watcher& parent, int descriptor, access_token) noexcept;
 

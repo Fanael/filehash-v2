@@ -45,8 +45,8 @@ public:
     int fd() const noexcept;
     struct ::stat stat() const;
     void rewind() const;
-    span<std::byte> read(span<std::byte> buffer) const;
-    std::optional<span<std::byte>> read_nonblocking(span<std::byte> buffer) const;
+    [[nodiscard]] span<std::byte> read(span<std::byte> buffer) const;
+    [[nodiscard]] std::optional<span<std::byte>> read_nonblocking(span<std::byte> buffer) const;
     void drop_o_nonblock() const;
     void fadvise(int mode, off_t offset = 0, off_t len = 0) const;
 private:
