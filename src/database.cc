@@ -237,10 +237,10 @@ database::database(std::string_view path)
     : connection(open_database(path, sqlite::open_mode::open_existing)),
       current_transaction(sqlite::invalid_transaction_tag)
 {
-    // Some of the pragmas we set may need to be done outside of a transaction.
+    // Some of the pragmas need to be applied outside of an transaction,
+    // which we start only when first needed anyway.
     apply_common_pragmas(connection);
     check_application_id(connection);
-    current_transaction = connection.begin_transaction();
 }
 
 void database::save_changes()
@@ -252,6 +252,7 @@ void database::save_changes()
 
 void database::vacuum()
 {
+    start_transaction_if_needed();
     // Get rid of unreferenced paths and hashes, but create temporary
     // indices first so that foreign key enforcement doesn't require full
     // table scans.
@@ -276,6 +277,7 @@ void database::vacuum()
 
 snapshot database::create_empty_snapshot(std::string_view name)
 {
+    start_transaction_if_needed();
     const auto snapshot_start_time = serialize_timestamp(current_time());
     const auto timestamp_bytes = as_bytes(span(&snapshot_start_time, 1));
     auto stmt = connection.prepare(
@@ -287,12 +289,14 @@ snapshot database::create_empty_snapshot(std::string_view name)
 
 snapshot database::open_snapshot(std::string_view name)
 {
+    start_transaction_if_needed();
     auto stmt = make_statement_lookup_statement(connection);
     return snapshot(get_snapshot_id(stmt, name), *this);
 }
 
 bool database::remove_snapshot(std::string_view name)
 {
+    start_transaction_if_needed();
     auto stmt = connection.prepare("DELETE FROM snapshots WHERE name = ?;");
     stmt.bind(name);
     stmt.step();
@@ -301,10 +305,18 @@ bool database::remove_snapshot(std::string_view name)
 
 diff database::open_diff(std::string_view old_snapshot_name, std::string_view new_snapshot_name)
 {
+    start_transaction_if_needed();
     auto stmt = make_statement_lookup_statement(connection);
     const auto old_snapshot_id = get_snapshot_id(stmt, old_snapshot_name);
     const auto new_snapshot_id = get_snapshot_id(stmt, new_snapshot_name);
     return diff(old_snapshot_id, new_snapshot_id, *this);
+}
+
+void database::start_transaction_if_needed()
+{
+    if(!current_transaction.valid()) {
+        current_transaction = connection.begin_transaction();
+    }
 }
 
 

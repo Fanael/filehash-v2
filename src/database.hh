@@ -46,8 +46,8 @@ public:
     static void initialize(std::string_view path);
 
     explicit database(std::string_view path);
-    // Disables moves because we love storing parent pointers in all
-    // the child object we create.
+    // Disable moves because this class loves keeping parent pointers in all
+    // the child object it creates.
     database(database&&) = delete;
     database& operator=(database&&) = delete;
 
@@ -64,6 +64,8 @@ private:
     friend class snapshot;
     friend class mismatched_files_cursor;
     friend class mismatched_chunks_cursor;
+
+    void start_transaction_if_needed();
 
     sqlite::connection connection;
     sqlite::transaction current_transaction;
