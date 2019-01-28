@@ -287,7 +287,9 @@ void transaction::commit()
 {
     parent->commit_statement.reset();
     parent->commit_statement.step();
-    parent.release();
+    // The commit succeeded, null out the connection pointer so that
+    // our destructor doesn't attempt to rollback.
+    static_cast<void>(parent.release());
 }
 
 bool transaction::valid() const noexcept
