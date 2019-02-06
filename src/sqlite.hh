@@ -109,7 +109,7 @@ private:
 
     // Note that the result for blobs and strings is only guaranteed to live
     // until the next call to reset and/or step.
-    std::int64_t get(int column_id, int_type_tag);
+    std::int64_t get(int column_id, int_type_tag) noexcept;
     span<const std::byte> get(int column_id, blob_type_tag);
     std::string_view get(int column_id, string_type_tag);
 

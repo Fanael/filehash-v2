@@ -145,7 +145,7 @@ void statement::check_column_count(std::size_t column_count) const
     }
 }
 
-std::int64_t statement::get(int column_id, int_type_tag)
+std::int64_t statement::get(int column_id, int_type_tag) noexcept
 {
     // NB: column_id not checked because it's checked ahead of time when
     // creating a cursor.
