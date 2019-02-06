@@ -52,6 +52,11 @@ namespace {
     throw_error(sqlite3_db_handle(statement));
 }
 
+int get_error_code(sqlite3_stmt* statement) noexcept
+{
+    return sqlite3_errcode(sqlite3_db_handle(statement));
+}
+
 void initialize_sqlite()
 {
     struct initializer {
@@ -157,6 +162,9 @@ span<const std::byte> statement::get(int column_id, blob_type_tag)
     // NB: column_id not checked because it's checked ahead of time when
     // creating a cursor.
     const auto data = sqlite3_column_blob(handle.get(), column_id);
+    if(data == nullptr && get_error_code(handle.get()) == SQLITE_NOMEM) {
+        throw_error(SQLITE_NOMEM);
+    }
     const auto size = sqlite3_column_bytes(handle.get(), column_id);
     return {static_cast<const std::byte*>(data), static_cast<unsigned>(size)};
 }
@@ -166,6 +174,9 @@ std::string_view statement::get(int column_id, string_type_tag)
     // NB: column_id not checked because it's checked ahead of time when
     // creating a cursor.
     const auto data = sqlite3_column_text(handle.get(), column_id);
+    if(data == nullptr && get_error_code(handle.get()) == SQLITE_NOMEM) {
+        throw_error(SQLITE_NOMEM);
+    }
     const auto size = sqlite3_column_bytes(handle.get(), column_id);
     return {reinterpret_cast<const char*>(data), static_cast<unsigned>(size)};
 }
