@@ -52,11 +52,6 @@ namespace {
     throw_error(sqlite3_db_handle(statement));
 }
 
-int get_error_code(sqlite3_stmt* statement) noexcept
-{
-    return sqlite3_errcode(sqlite3_db_handle(statement));
-}
-
 void initialize_sqlite()
 {
     struct initializer {
@@ -82,6 +77,13 @@ constexpr int mode_to_flags(open_mode mode) noexcept
     case open_mode::create_new: return SQLITE_OPEN_CREATE;
     }
     FILEHASH_UNREACHABLE();
+}
+
+void check_column_for_null(sqlite3_stmt* statement, int column_id)
+{
+    if(sqlite3_column_type(statement, column_id) == SQLITE_NULL) {
+        throw_error("Unexpected NULL in a result row");
+    }
 }
 
 } // unnamed namespace
@@ -150,10 +152,11 @@ void statement::check_column_count(std::size_t column_count) const
     }
 }
 
-std::int64_t statement::get(int column_id, int_type_tag) noexcept
+std::int64_t statement::get(int column_id, int_type_tag)
 {
     // NB: column_id not checked because it's checked ahead of time when
     // creating a cursor.
+    check_column_for_null(handle.get(), column_id);
     return sqlite3_column_int64(handle.get(), column_id);
 }
 
@@ -161,8 +164,9 @@ span<const std::byte> statement::get(int column_id, blob_type_tag)
 {
     // NB: column_id not checked because it's checked ahead of time when
     // creating a cursor.
+    check_column_for_null(handle.get(), column_id);
     const auto data = sqlite3_column_blob(handle.get(), column_id);
-    if(data == nullptr && get_error_code(handle.get()) == SQLITE_NOMEM) {
+    if(data == nullptr) {
         throw_error(SQLITE_NOMEM);
     }
     const auto size = sqlite3_column_bytes(handle.get(), column_id);
@@ -173,8 +177,9 @@ std::string_view statement::get(int column_id, string_type_tag)
 {
     // NB: column_id not checked because it's checked ahead of time when
     // creating a cursor.
+    check_column_for_null(handle.get(), column_id);
     const auto data = sqlite3_column_text(handle.get(), column_id);
-    if(data == nullptr && get_error_code(handle.get()) == SQLITE_NOMEM) {
+    if(data == nullptr) {
         throw_error(SQLITE_NOMEM);
     }
     const auto size = sqlite3_column_bytes(handle.get(), column_id);
