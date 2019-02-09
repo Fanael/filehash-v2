@@ -18,6 +18,7 @@
 #define INCLUDED_2F1851206AA24389B884DAF6604E3E8C
 #include <cstddef>
 #include <cstdint>
+#include <iosfwd>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -53,6 +54,7 @@ public:
 
     void save_changes();
     void vacuum();
+    std::uint_least64_t integrity_check(std::ostream& error_stream);
     snapshot create_empty_snapshot(std::string_view name);
     snapshot open_snapshot(std::string_view name);
     bool remove_snapshot(std::string_view name);

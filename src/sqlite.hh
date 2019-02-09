@@ -52,9 +52,20 @@ struct string_type_tag {
     using column_type = std::string_view;
 };
 
+template <typename Tag>
+struct nullable_type_tag {
+    using column_type = std::optional<typename Tag::column_type>;
+};
+
 constexpr int_type_tag int_tag = {};
 constexpr blob_type_tag blob_tag = {};
 constexpr string_type_tag string_tag = {};
+
+template <typename Tag>
+constexpr nullable_type_tag<Tag> nullable_tag(Tag) noexcept
+{
+    return {};
+}
 
 class statement;
 template <typename... Tags>
@@ -110,6 +121,7 @@ private:
     // Note that the result for blobs and strings is only guaranteed to live
     // until the next call to reset and/or step.
     std::int64_t get(int column_id, int_type_tag);
+    std::optional<std::int64_t> get(int column_id, nullable_type_tag<int_type_tag>) noexcept;
     span<const std::byte> get(int column_id, blob_type_tag);
     std::string_view get(int column_id, string_type_tag);
 
@@ -232,7 +244,10 @@ row_cursor<Tags...> statement::cursor(Tags...)
 template <typename ... Tags>
 owning_cursor<Tags...> statement::owning_cursor(Tags...) &&
 {
-    return owning_cursor<Tags...>(std::move(*this));
+    // Necessary to distinguish between owning_cursor the class
+    // and owning_cursor the member function.
+    using cursor_type = class owning_cursor<Tags...>;
+    return cursor_type(std::move(*this));
 }
 
 template <typename... Tags>

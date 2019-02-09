@@ -65,6 +65,10 @@ struct diff_command {
     std::string_view new_snapshot_name;
 };
 
+struct fsck_command {
+    std::string_view database_path;
+};
+
 struct gc_command {
     std::string_view database_path;
 };
@@ -103,6 +107,7 @@ struct update_command {
 
 using command = std::variant<
     diff_command,
+    fsck_command,
     gc_command,
     help_command,
     init_command,

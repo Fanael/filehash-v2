@@ -385,6 +385,21 @@ distinguished from other errors by the exit code, see '--help'.
 If a snapshot name of either name doesn't exist, the command will fail.)eof",
     },
     {
+        "fsck",
+        command_parser_impl<fsck_command,
+            string_arg<&fsck_command::database_path>>::parse,
+        "<DATABASE-PATH>",
+        "Check the database integrity",
+        R"eof(Perform a thorough integrity check of the database file.
+
+The use of this command is normally unnecessary, because SQLite is resilient
+to crashes, including full system crashes. It's meant to be used only when
+the database is suspected to be corrupt due to media failure, or due to
+another program mishandling the database file.
+
+This operation is very thorough and thus very costly.)eof",
+    },
+    {
         "gc",
         command_parser_impl<gc_command,
             string_arg<&gc_command::database_path>>::parse,
@@ -416,7 +431,7 @@ so it will fail if the file system is short on free space.)eof"
 the speficied command.
 
 If no command name is passed, print general usage information, just like
---help.)eof"
+'--help'.)eof"
     },
     {
         "init",

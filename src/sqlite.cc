@@ -79,9 +79,14 @@ constexpr int mode_to_flags(open_mode mode) noexcept
     FILEHASH_UNREACHABLE();
 }
 
+bool is_column_null(sqlite3_stmt* statement, int column_id) noexcept
+{
+    return sqlite3_column_type(statement, column_id) == SQLITE_NULL;
+}
+
 void check_column_for_null(sqlite3_stmt* statement, int column_id)
 {
-    if(sqlite3_column_type(statement, column_id) == SQLITE_NULL) {
+    if(is_column_null(statement, column_id)) {
         throw_error("Unexpected NULL in a result row");
     }
 }
@@ -152,18 +157,23 @@ void statement::check_column_count(std::size_t column_count) const
     }
 }
 
+// NB: getters don't check column_id because it's checked ahead of time when
+// creating a cursor.
 std::int64_t statement::get(int column_id, int_type_tag)
 {
-    // NB: column_id not checked because it's checked ahead of time when
-    // creating a cursor.
     check_column_for_null(handle.get(), column_id);
     return sqlite3_column_int64(handle.get(), column_id);
 }
 
+std::optional<std::int64_t> statement::get(int column_id, nullable_type_tag<int_type_tag>) noexcept
+{
+    return is_column_null(handle.get(), column_id)
+        ? std::nullopt
+        : std::optional(sqlite3_column_int64(handle.get(), column_id));
+}
+
 span<const std::byte> statement::get(int column_id, blob_type_tag)
 {
-    // NB: column_id not checked because it's checked ahead of time when
-    // creating a cursor.
     check_column_for_null(handle.get(), column_id);
     const auto data = sqlite3_column_blob(handle.get(), column_id);
     if(data == nullptr) {
@@ -175,8 +185,6 @@ span<const std::byte> statement::get(int column_id, blob_type_tag)
 
 std::string_view statement::get(int column_id, string_type_tag)
 {
-    // NB: column_id not checked because it's checked ahead of time when
-    // creating a cursor.
     check_column_for_null(handle.get(), column_id);
     const auto data = sqlite3_column_text(handle.get(), column_id);
     if(data == nullptr) {

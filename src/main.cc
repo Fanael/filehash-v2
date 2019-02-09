@@ -310,6 +310,17 @@ exit_status run_command(const args::diff_command& args, const args::common_args&
     return found_mismatches ? exit_status::mismatch_found : exit_status::success;
 }
 
+exit_status run_command(const args::fsck_command& args, const args::common_args&)
+{
+    db::database database(args.database_path);
+    const auto errors_found = database.integrity_check(std::clog);
+    if(errors_found > 0) {
+        std::clog << "\nfsck: " << errors_found << " errors found total.\n";
+        return exit_status::error;
+    }
+    return exit_status::success;
+}
+
 exit_status run_command(const args::gc_command& args, const args::common_args&)
 {
     db::database database(args.database_path);

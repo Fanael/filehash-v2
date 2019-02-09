@@ -16,6 +16,7 @@
 // along with filehash-v2.  If not, see <https://www.gnu.org/licenses/>.
 #include <array>
 #include <memory>
+#include <ostream>
 #include <string_view>
 #include <string>
 #include <type_traits>
@@ -173,6 +174,110 @@ std::int64_t get_snapshot_id(sqlite::statement& lookup_statement, std::string_vi
 }
 
 
+std::uint_least64_t check_sqlite_integrity(sqlite::connection& connection,
+    std::ostream& error_stream)
+{
+    error_stream << "Running PRAGMA integrity_check... " << std::flush;
+    // SQLite always limits the number of messages returned from
+    // integrity_check, there's no way to make it return *all* messages.
+    // So limit the number of error messages to a thousand, because if
+    // a database has more errors than that, it's likely unsalvageable.
+    auto cursor = connection.prepare("PRAGMA integrity_check(1000);").owning_cursor(
+        sqlite::string_tag);
+    std::uint_least64_t total_errors = 0;
+    while(auto row = cursor.next()) {
+        auto string = std::get<0>(*row);
+        if(total_errors == 0) {
+            if(string == std::string_view("ok")) {
+                continue;
+            }
+            error_stream << "ERROR!\n";
+        }
+        ++total_errors;
+        error_stream << string << '\n' << std::flush;
+    }
+    if(total_errors == 0) {
+        error_stream << "ok\n";
+    }
+    return total_errors;
+}
+
+std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
+    std::ostream& error_stream)
+{
+    error_stream << "Running PRAGMA foreign_key_check... " << std::flush;
+    auto cursor = connection.prepare("PRAGMA foreign_key_check;").owning_cursor(sqlite::string_tag,
+        sqlite::nullable_tag(sqlite::int_tag), sqlite::string_tag, sqlite::int_tag);
+    std::uint_least64_t total_errors = 0;
+    while(auto row = cursor.next()) {
+        if(total_errors == 0) {
+            error_stream << "ERROR!\n";
+        }
+        ++total_errors;
+        error_stream << "Foreign key constraint failed:\n  Child table: " << std::get<0>(*row)
+            << "\n  Parent table: " << std::get<2>(*row) << "\n  Foreign key ID: "
+            << std::get<3>(*row) << "\n  Child table rowid: ";
+        if(auto rowid = std::get<1>(*row)) {
+            error_stream << *rowid;
+        } else {
+            error_stream << "(NULL)";
+        }
+        error_stream << '\n' << std::flush;
+    }
+    if(total_errors == 0) {
+        error_stream << "ok\n";
+    }
+    return total_errors;
+}
+
+std::uint_least64_t check_file_hashes(sqlite::connection& connection, std::ostream& error_stream)
+{
+    using sqlite::blob_tag;
+    using sqlite::int_tag;
+    using sqlite::string_tag;
+
+    error_stream << "Looking for file hash mismatches... " << std::flush;
+    auto file_cursor = connection.prepare(
+        "SELECT snapshot_id, path_id, hash "
+        "FROM snapshot_files "
+        "JOIN hashes USING (hash_id);").owning_cursor(int_tag, int_tag, blob_tag);
+    auto file_chunk_cursor = connection.prepare(
+        "SELECT hash "
+        "FROM file_chunks "
+        "JOIN hashes USING (hash_id) "
+        "WHERE snapshot_id = ? AND path_id = ? "
+        "ORDER BY chunk_id ASC;").owning_cursor(blob_tag);
+    std::uint_least64_t total_errors = 0;
+    while(auto file = file_cursor.next()) {
+        const auto snapshot_id = std::get<0>(*file);
+        const auto path_id = std::get<1>(*file);
+        const auto db_hash = verify_hash_size(std::get<2>(*file));
+        file_chunk_cursor.rewind();
+        file_chunk_cursor.bind(snapshot_id, path_id);
+
+        blake2sp4 hash_engine;
+        while(auto chunk_hash = file_chunk_cursor.next()) {
+            hash_engine.update(verify_hash_size(std::get<0>(*chunk_hash)));
+        }
+        const auto actual_hash = hash_engine.finalize();
+        if(std::equal(db_hash.begin(), db_hash.end(), actual_hash.begin(), actual_hash.end())) {
+            continue;
+        }
+        // Hashes don't match, it's an error.
+        if(total_errors == 0) {
+            error_stream << "ERROR!\n";
+        }
+        ++total_errors;
+        error_stream << "The hash of file ID " << path_id << " in snapshot ID " << snapshot_id
+            << " doesn't match the hash of its chunks' hashes.\n" << std::flush;
+    }
+    if(total_errors == 0) {
+        error_stream << "ok\n";
+    }
+    return total_errors;
+}
+
+
 template <typename T, typename Func>
 auto map_opt(const std::optional<T>& opt, Func&& function)
 {
@@ -273,6 +378,20 @@ void database::vacuum()
     save_changes();
     connection.execute("VACUUM;");
     connection.execute("PRAGMA wal_checkpoint(TRUNCATE);");
+}
+
+std::uint_least64_t database::integrity_check(std::ostream& error_stream)
+{
+    start_transaction_if_needed();
+    // Run this first because if it fails, the database file is unreliable
+    // and we don't want to do anything else.
+    const auto integrity_errors = check_sqlite_integrity(connection, error_stream);
+    if(integrity_errors > 0) {
+        return integrity_errors;
+    }
+    const auto foreign_key_errors = check_sqlite_foreign_keys(connection, error_stream);
+    const auto file_hash_mismatch_error = check_file_hashes(connection, error_stream);
+    return foreign_key_errors + file_hash_mismatch_error;
 }
 
 snapshot database::create_empty_snapshot(std::string_view name)
