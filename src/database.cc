@@ -166,7 +166,7 @@ std::int64_t get_snapshot_id(sqlite::statement& lookup_statement, std::string_vi
 {
     lookup_statement.reset();
     lookup_statement.bind(name);
-    if(auto row = lookup_statement.get_single_row(sqlite::int_tag)) {
+    if(const auto row = lookup_statement.get_single_row(sqlite::int_tag)) {
         return std::get<0>(*row);
     } else {
         throw error(std::string("no snapshot named \"").append(name).append("\" found"));
@@ -185,7 +185,7 @@ std::uint_least64_t check_sqlite_integrity(sqlite::connection& connection,
     auto cursor = connection.prepare("PRAGMA integrity_check(1000);").owning_cursor(
         sqlite::string_tag);
     std::uint_least64_t total_errors = 0;
-    while(auto row = cursor.next()) {
+    while(const auto row = cursor.next()) {
         auto string = std::get<0>(*row);
         if(total_errors == 0) {
             if(string == std::string_view("ok")) {
@@ -209,7 +209,7 @@ std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
     auto cursor = connection.prepare("PRAGMA foreign_key_check;").owning_cursor(sqlite::string_tag,
         sqlite::nullable_tag(sqlite::int_tag), sqlite::string_tag, sqlite::int_tag);
     std::uint_least64_t total_errors = 0;
-    while(auto row = cursor.next()) {
+    while(const auto row = cursor.next()) {
         if(total_errors == 0) {
             error_stream << "ERROR!\n";
         }
@@ -217,7 +217,7 @@ std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
         error_stream << "Foreign key constraint failed:\n  Child table: " << std::get<0>(*row)
             << "\n  Parent table: " << std::get<2>(*row) << "\n  Foreign key ID: "
             << std::get<3>(*row) << "\n  Child table rowid: ";
-        if(auto rowid = std::get<1>(*row)) {
+        if(const auto rowid = std::get<1>(*row)) {
             error_stream << *rowid;
         } else {
             error_stream << "(NULL)";
@@ -248,7 +248,7 @@ std::uint_least64_t check_file_hashes(sqlite::connection& connection, std::ostre
         "WHERE snapshot_id = ? AND path_id = ? "
         "ORDER BY chunk_id ASC;").owning_cursor(blob_tag);
     std::uint_least64_t total_errors = 0;
-    while(auto file = file_cursor.next()) {
+    while(const auto file = file_cursor.next()) {
         const auto snapshot_id = std::get<0>(*file);
         const auto path_id = std::get<1>(*file);
         const auto db_hash = verify_hash_size(std::get<2>(*file));
@@ -256,7 +256,7 @@ std::uint_least64_t check_file_hashes(sqlite::connection& connection, std::ostre
         file_chunk_cursor.bind(snapshot_id, path_id);
 
         blake2sp4 hash_engine;
-        while(auto chunk_hash = file_chunk_cursor.next()) {
+        while(const auto chunk_hash = file_chunk_cursor.next()) {
             hash_engine.update(verify_hash_size(std::get<0>(*chunk_hash)));
         }
         const auto actual_hash = hash_engine.finalize();

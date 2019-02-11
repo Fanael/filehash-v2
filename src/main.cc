@@ -275,7 +275,7 @@ exit_status run_hashing_workers(db::snapshot& snapshot, const args::common_args&
 
 void print_chunk_mismatches(db::mismatched_chunks_cursor& chunks_cursor)
 {
-    while(auto chunk = chunks_cursor.next()) {
+    while(const auto chunk = chunks_cursor.next()) {
         const auto chunk_id = chunk->chunk_id;
         static_assert(chunk_size == 1048576, "chunk size differs from UI text");
         std::clog << "  Megabyte block #" << chunk->chunk_id
@@ -300,7 +300,7 @@ exit_status run_command(const args::diff_command& args, const args::common_args&
     bool found_mismatches = false;
     db::mismatched_files_cursor file_cursor(diff);
     db::mismatched_chunks_cursor chunk_cursor(diff);
-    while(auto file = file_cursor.next()) {
+    while(const auto file = file_cursor.next()) {
         found_mismatches = true;
         std::clog << "Mismatch detected for \"" << file->file_path << "\"!\n Modification time: "
             << timestamp_formatter{file->modification_time.tv_sec} << '.' << std::setw(9)
@@ -333,7 +333,7 @@ exit_status run_command(const args::full_diff_command& args, const args::common_
     bool found_mismatches = false;
     auto file_cursor = database.open_full_diff();
     auto chunk_cursor = database.open_chunk_mismatch_cursor();
-    while(auto file = file_cursor.next()) {
+    while(const auto file = file_cursor.next()) {
         found_mismatches = true;
         std::clog << "Mismatch detected for \"" << file->file_path << "\"! \n Old snapshot: "
             << file->old_snapshot_name << " (ID " << file->old_snapshot_id << ")\n New snapshot: "
