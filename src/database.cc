@@ -630,21 +630,21 @@ mismatched_files_cursor::mismatched_files_cursor(diff& d)
     : cursor([&]{
         auto stmt = d.parent->connection.prepare(R"eof(
 SELECT
-  t1.path_id AS path_id,
+  old_s.path_id AS path_id,
   p.path AS path,
-  t1.mod_time AS modification_time,
-  h1.hash AS old_hash,
-  h2.hash AS new_hash
-FROM snapshot_files AS t1
-JOIN snapshot_files AS t2
-  ON t1.path_id = t2.path_id
- AND t1.mod_time = t2.mod_time
- AND t1.hash_id <> t2.hash_id
-JOIN paths AS p ON t1.path_id = p.path_id
-JOIN hashes AS h1 ON t1.hash_id = h1.hash_id
-JOIN hashes AS h2 ON t2.hash_id = h2.hash_id
-WHERE t1.snapshot_id = ?
-  AND t2.snapshot_id = ?;)eof");
+  old_s.mod_time AS modification_time,
+  old_h.hash AS old_hash,
+  new_h.hash AS new_hash
+FROM snapshot_files AS old_s
+JOIN snapshot_files AS new_s
+  ON old_s.path_id = new_s.path_id
+ AND old_s.mod_time = new_s.mod_time
+ AND old_s.hash_id <> new_s.hash_id
+JOIN paths AS p ON old_s.path_id = p.path_id
+JOIN hashes AS old_h ON old_s.hash_id = old_h.hash_id
+JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id
+WHERE old_s.snapshot_id = ?
+  AND new_s.snapshot_id = ?;)eof");
         stmt.bind(d.old_snapshot_id, d.new_snapshot_id);
         return stmt;
     }())
@@ -698,19 +698,19 @@ auto mismatched_chunks_cursor::next() -> std::optional<row_type>
 mismatched_chunks_cursor::mismatched_chunks_cursor(database& db)
     : cursor(db.connection.prepare(R"eof(
 SELECT
-  t1.chunk_id AS chunk_id,
-  h1.hash AS old_hash,
-  h2.hash AS new_hash
-FROM file_chunks AS t1
-JOIN file_chunks AS t2
-  ON t1.path_id = t2.path_id
- AND t1.chunk_id = t2.chunk_id
- AND t1.hash_id <> t2.hash_id
-JOIN hashes AS h1 ON t1.hash_id = h1.hash_id
-JOIN hashes AS h2 ON t2.hash_id = h2.hash_id
-WHERE t1.snapshot_id = ?
-  AND t2.snapshot_id = ?
-  AND t1.path_id = ?;)eof"))
+  old_s.chunk_id AS chunk_id,
+  old_h.hash AS old_hash,
+  new_h.hash AS new_hash
+FROM file_chunks AS old_s
+JOIN file_chunks AS new_s
+  ON old_s.path_id = new_s.path_id
+ AND old_s.chunk_id = new_s.chunk_id
+ AND old_s.hash_id <> new_s.hash_id
+JOIN hashes AS old_h ON old_s.hash_id = old_h.hash_id
+JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id
+WHERE old_s.snapshot_id = ?
+  AND new_s.snapshot_id = ?
+  AND old_s.path_id = ?;)eof"))
 {
 }
 
