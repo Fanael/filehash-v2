@@ -382,7 +382,7 @@ hashes don't match.
 If any mismatch occurs, the command will fail. That condition can be
 distinguished from other errors by the exit code, see '--help'.
 
-If a snapshot name of either name doesn't exist, the command will fail.)eof",
+If a snapshot name of either name doesn't exist, the command will fail.)eof"
     },
     {
         "fsck",
@@ -397,7 +397,34 @@ to crashes, including full system crashes. It's meant to be used only when
 the database is suspected to be corrupt due to media failure, or due to
 another program mishandling the database file.
 
-This operation is very thorough and thus very costly.)eof",
+This operation is very thorough and thus very costly.)eof"
+    },
+    {
+        "full-diff",
+        command_parser_impl<full_diff_command,
+            string_arg<&full_diff_command::database_path>>::parse,
+        "<DATABASE-PATH>",
+        "Compare all consecutive snapshots",
+        R"eof(Compare all consecutive pairs of snapshots for potention hash mismatches.
+
+The snapshots are compared pairwise, starting from the oldest one by creation
+time, i.e. if the oldest snapshot is A, and the newest snapshot is D,
+the snapshot A will be compared with B, B will be compared with C, and C will
+be compared with D.
+
+For every file path, compare the file hashes between the two given snapshots
+only if the file's modification times between snapshots are equal. If they're
+not, the file is assumed to have been modified, and thus there's no point
+in comparing the hashes.
+
+If a hash mismatch occurs, the file path, modification time and both old and
+new hashes are printed, followed by hashes of the regions in that file whose
+hashes don't match.
+
+If any mismatch occurs, the command will fail. That condition can be
+distinguished from other errors by the exit code, see '--help'.
+
+If a snapshot name of either name doesn't exist, the command will fail.)eof"
     },
     {
         "gc",

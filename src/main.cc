@@ -273,6 +273,20 @@ exit_status run_hashing_workers(db::snapshot& snapshot, const args::common_args&
 }
 
 
+void print_chunk_mismatches(db::mismatched_chunks_cursor& chunks_cursor)
+{
+    while(auto chunk = chunks_cursor.next()) {
+        const auto chunk_id = chunk->chunk_id;
+        static_assert(chunk_size == 1048576, "chunk size differs from UI text");
+        std::clog << "  Megabyte block #" << chunk->chunk_id
+            << " mismatch (byte range " << chunk_id * int{chunk_size}
+            << ".." << (chunk_id + 1) * int{chunk_size} - 1 << "):\n   Old block hash: "
+            << hex_byte_formatter{chunk->old_hash} << "\n   New block hash: "
+            << hex_byte_formatter{chunk->new_hash} << '\n' << std::flush;
+    }
+}
+
+
 exit_status run_command(const args::diff_command& args, const args::common_args&)
 {
     db::database database(args.database_path);
@@ -285,7 +299,7 @@ exit_status run_command(const args::diff_command& args, const args::common_args&
 
     bool found_mismatches = false;
     db::mismatched_files_cursor file_cursor(diff);
-    db::mismatched_chunks_cursor chunks_cursor(diff);
+    db::mismatched_chunks_cursor chunk_cursor(diff);
     while(auto file = file_cursor.next()) {
         found_mismatches = true;
         std::clog << "Mismatch detected for \"" << file->file_path << "\"!\n Modification time: "
@@ -294,16 +308,8 @@ exit_status run_command(const args::diff_command& args, const args::common_args&
             << hex_byte_formatter{file->old_hash} << "\n New hash: "
             << hex_byte_formatter{file->new_hash} << '\n' << std::flush;
 
-        chunks_cursor.rewind_to_file(file->file_id);
-        while(auto chunk = chunks_cursor.next()) {
-            const auto chunk_id = chunk->chunk_id;
-            static_assert(chunk_size == 1048576, "chunk size differs from UI text");
-            std::clog << "  Megabyte block #" << chunk->chunk_id
-                << " mismatch (byte range " << chunk_id * int{chunk_size}
-                << ".." << (chunk_id + 1) * int{chunk_size} - 1 << "):\n   Old block hash: "
-                << hex_byte_formatter{chunk->old_hash} << "\n   New block hash: "
-                << hex_byte_formatter{chunk->new_hash} << '\n' << std::flush;
-        }
+        chunk_cursor.rewind_to_file(file->file_id);
+        print_chunk_mismatches(chunk_cursor);
         std::clog << '\n';
     }
 
@@ -319,6 +325,30 @@ exit_status run_command(const args::fsck_command& args, const args::common_args&
         return exit_status::error;
     }
     return exit_status::success;
+}
+
+exit_status run_command(const args::full_diff_command& args, const args::common_args&)
+{
+    db::database database(args.database_path);
+    bool found_mismatches = false;
+    auto file_cursor = database.open_full_diff();
+    auto chunk_cursor = database.open_chunk_mismatch_cursor();
+    while(auto file = file_cursor.next()) {
+        found_mismatches = true;
+        std::clog << "Mismatch detected for \"" << file->file_path << "\"! \n Old snapshot: "
+            << file->old_snapshot_name << " (ID " << file->old_snapshot_id << ")\n New snapshot: "
+            << file->new_snapshot_name << " (ID " << file->new_snapshot_id
+            << ")\n Modification time: " << timestamp_formatter{file->modification_time.tv_sec}
+            << '.' << std::setw(9) << std::setfill('0') << file->modification_time.tv_nsec
+            << "\n Old hash: " << hex_byte_formatter{file->old_hash}
+            << "\n New hash: " << hex_byte_formatter{file->new_hash} << '\n' << std::flush;
+
+       chunk_cursor.rewind_to_file_in(file->file_id, file->old_snapshot_id, file->new_snapshot_id);
+       print_chunk_mismatches(chunk_cursor);
+       std::clog << '\n';
+    }
+
+    return found_mismatches ? exit_status::mismatch_found : exit_status::success;
 }
 
 exit_status run_command(const args::gc_command& args, const args::common_args&)

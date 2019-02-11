@@ -431,6 +431,18 @@ diff database::open_diff(std::string_view old_snapshot_name, std::string_view ne
     return diff(old_snapshot_id, new_snapshot_id, *this);
 }
 
+full_diff_mismatched_files_cursor database::open_full_diff()
+{
+    start_transaction_if_needed();
+    return full_diff_mismatched_files_cursor(*this);
+}
+
+mismatched_chunks_cursor database::open_chunk_mismatch_cursor()
+{
+    start_transaction_if_needed();
+    return mismatched_chunks_cursor(*this);
+}
+
 void database::start_transaction_if_needed()
 {
     if(!current_transaction.valid()) {
@@ -648,8 +660,37 @@ auto mismatched_files_cursor::next() -> std::optional<row_type>
 
 
 mismatched_chunks_cursor::mismatched_chunks_cursor(diff& d)
-    : cursor([&]{
-          auto stmt = d.parent->connection.prepare(R"eof(
+    : mismatched_chunks_cursor(*d.parent)
+{
+    cursor.bind(d.old_snapshot_id, d.new_snapshot_id);
+}
+
+void mismatched_chunks_cursor::rewind_to_file(std::int64_t file_id)
+{
+    cursor.rewind();
+    cursor.bind_one(3, file_id);
+}
+
+void mismatched_chunks_cursor::rewind_to_file_in(std::int64_t file_id, std::int64_t old_snapshot_id,
+    std::int64_t new_snapshot_id)
+{
+    cursor.rewind();
+    cursor.bind(old_snapshot_id, new_snapshot_id, file_id);
+}
+
+auto mismatched_chunks_cursor::next() -> std::optional<row_type>
+{
+    return map_opt(cursor.next(), [&](const auto& tuple) {
+        return row_type{
+            std::get<0>(tuple),
+            verify_hash_size(std::get<1>(tuple)),
+            verify_hash_size(std::get<2>(tuple))
+        };
+    });
+}
+
+mismatched_chunks_cursor::mismatched_chunks_cursor(database& db)
+    : cursor(db.connection.prepare(R"eof(
 SELECT
   t1.chunk_id AS chunk_id,
   h1.hash AS old_hash,
@@ -663,28 +704,61 @@ JOIN hashes AS h1 ON t1.hash_id = h1.hash_id
 JOIN hashes AS h2 ON t2.hash_id = h2.hash_id
 WHERE t1.snapshot_id = ?
   AND t2.snapshot_id = ?
-  AND t1.path_id = ?;)eof");
-          stmt.bind(d.old_snapshot_id, d.new_snapshot_id);
-          return stmt;
-    }())
+  AND t1.path_id = ?;)eof"))
 {
 }
 
-void mismatched_chunks_cursor::rewind_to_file(std::int64_t file_id)
-{
-    cursor.rewind();
-    cursor.bind_one(3, file_id);
-}
 
-auto mismatched_chunks_cursor::next() -> std::optional<row_type>
+auto full_diff_mismatched_files_cursor::next() -> std::optional<row_type>
 {
     return map_opt(cursor.next(), [&](const auto& tuple) {
         return row_type{
             std::get<0>(tuple),
-            verify_hash_size(std::get<1>(tuple)),
-            verify_hash_size(std::get<2>(tuple))
+            std::get<1>(tuple),
+            std::get<2>(tuple),
+            std::get<3>(tuple),
+            std::get<4>(tuple),
+            std::get<5>(tuple),
+            deserialize_timestamp(std::get<6>(tuple)),
+            verify_hash_size(std::get<7>(tuple)),
+            verify_hash_size(std::get<8>(tuple))
         };
     });
+}
+
+full_diff_mismatched_files_cursor::full_diff_mismatched_files_cursor(database& db)
+    : cursor(db.connection.prepare(R"eof(
+SELECT
+  sids.snapshot_id AS old_snapshot_id,
+  sids.successor_id AS new_snapshot_id,
+  sids.name AS old_snapshot_name,
+  sids.successor_name AS new_snapshot_name,
+  old_s.path_id AS path_id,
+  p.path AS path,
+  old_s.mod_time AS modification_time,
+  old_h.hash AS old_hash,
+  new_h.hash AS new_hash
+FROM (
+  SELECT *
+  FROM (
+    SELECT
+      snapshot_id,
+      LEAD(snapshot_id) OVER w AS successor_id,
+      name,
+      LEAD(name) OVER w AS successor_name
+    FROM snapshots
+    WINDOW w AS (ORDER BY start_time ASC))
+  WHERE successor_id IS NOT NULL) AS sids
+JOIN snapshot_files AS old_s ON old_s.snapshot_id = sids.snapshot_id
+JOIN snapshot_files AS new_s
+  ON new_s.snapshot_id = sids.successor_id
+ AND old_s.path_id = new_s.path_id
+ AND old_s.mod_time = new_s.mod_time
+ AND old_s.hash_id <> new_s.hash_id
+JOIN paths AS p ON old_s.path_id = p.path_id
+JOIN hashes AS old_h ON old_s.hash_id = old_h.hash_id
+JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id;)eof"))
+{
 }
 
 } // namespace filehash::db

@@ -36,6 +36,7 @@ class error final : public std::runtime_error {
 };
 
 class diff;
+class full_diff_mismatched_files_cursor;
 class hash_inserter;
 class mismatched_chunks_cursor;
 class mismatched_files_cursor;
@@ -59,13 +60,16 @@ public:
     snapshot open_snapshot(std::string_view name);
     bool remove_snapshot(std::string_view name);
     diff open_diff(std::string_view old_snapshot_name, std::string_view new_snapshot_name);
+    full_diff_mismatched_files_cursor open_full_diff();
+    mismatched_chunks_cursor open_chunk_mismatch_cursor();
 private:
     friend class diff;
+    friend class full_diff_mismatched_files_cursor;
     friend class hash_inserter;
+    friend class mismatched_chunks_cursor;
+    friend class mismatched_files_cursor;
     friend class snapshot_cursor;
     friend class snapshot;
-    friend class mismatched_files_cursor;
-    friend class mismatched_chunks_cursor;
 
     void start_transaction_if_needed();
 
@@ -177,9 +181,47 @@ public:
     explicit mismatched_chunks_cursor(diff& d);
 
     void rewind_to_file(std::int64_t file_id);
+    void rewind_to_file_in(std::int64_t file_id, std::int64_t old_snapshot_id,
+        std::int64_t new_snapshot_id);
     std::optional<row_type> next();
 private:
+    friend class database;
+
+    explicit mismatched_chunks_cursor(database& db);
+
     sqlite::owning_cursor<sqlite::int_type_tag, sqlite::blob_type_tag,
+        sqlite::blob_type_tag> cursor;
+};
+
+class full_diff_mismatched_files_cursor {
+public:
+    struct row_type {
+        std::int64_t old_snapshot_id;
+        std::int64_t new_snapshot_id;
+        std::string_view old_snapshot_name;
+        std::string_view new_snapshot_name;
+        std::int64_t file_id;
+        std::string_view file_path;
+        timespec modification_time;
+        span<const std::byte> old_hash;
+        span<const std::byte> new_hash;
+    };
+
+    std::optional<row_type> next();
+private:
+    friend class database;
+
+    explicit full_diff_mismatched_files_cursor(database& db);
+
+    sqlite::owning_cursor<
+        sqlite::int_type_tag,
+        sqlite::int_type_tag,
+        sqlite::string_type_tag,
+        sqlite::string_type_tag,
+        sqlite::int_type_tag,
+        sqlite::string_type_tag,
+        sqlite::blob_type_tag,
+        sqlite::blob_type_tag,
         sqlite::blob_type_tag> cursor;
 };
 
