@@ -376,11 +376,12 @@ exit_status run_command(const args::list_command& args, const args::common_args&
     constexpr int timestamp_width = 22;
 
     db::database database(args.database_path);
+    auto cursor = database.open_snapshot_cursor();
 
     std::cout << std::setw(name_width) << "Snapshot name"
         << std::setw(timestamp_width) << "Creation time"
         << std::setw(timestamp_width) << "Last update time" << '\n';
-    for(db::snapshot_cursor cursor(database); auto snapshot = cursor.next(); ) {
+    while(const auto snapshot = cursor.next()) {
         std::cout << std::setw(name_width) << snapshot->name
             << std::setw(timestamp_width) << timestamp_formatter{snapshot->start_time.tv_sec}
             << std::setw(timestamp_width) << timestamp_formatter{snapshot->end_time.tv_sec}

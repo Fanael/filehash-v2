@@ -59,6 +59,7 @@ public:
     snapshot create_empty_snapshot(std::string_view name);
     snapshot open_snapshot(std::string_view name);
     bool remove_snapshot(std::string_view name);
+    snapshot_cursor open_snapshot_cursor();
     diff open_diff(std::string_view old_snapshot_name, std::string_view new_snapshot_name);
     full_diff_mismatched_files_cursor open_full_diff();
     mismatched_chunks_cursor open_chunk_mismatch_cursor();
@@ -122,10 +123,12 @@ private:
 
 class snapshot_cursor {
 public:
-    explicit snapshot_cursor(database& db);
-
     std::optional<snapshot::metadata> next();
 private:
+    friend class database;
+
+    explicit snapshot_cursor(database& db);
+
     sqlite::owning_cursor<sqlite::string_type_tag, sqlite::blob_type_tag,
         sqlite::blob_type_tag> cursor;
 };

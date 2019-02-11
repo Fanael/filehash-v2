@@ -422,6 +422,12 @@ bool database::remove_snapshot(std::string_view name)
     return connection.change_count() > 0;
 }
 
+snapshot_cursor database::open_snapshot_cursor()
+{
+    start_transaction_if_needed();
+    return snapshot_cursor(*this);
+}
+
 diff database::open_diff(std::string_view old_snapshot_name, std::string_view new_snapshot_name)
 {
     start_transaction_if_needed();
@@ -570,12 +576,6 @@ void hash_inserter::finalize_file(std::int64_t file_id, const timespec& file_mod
 }
 
 
-snapshot_cursor::snapshot_cursor(database& db)
-    : cursor(db.connection.prepare(
-          "SELECT name, start_time, end_time FROM snapshots ORDER BY start_time DESC;"))
-{
-}
-
 std::optional<snapshot::metadata> snapshot_cursor::next()
 {
     return map_opt(cursor.next(), [&](const auto& tuple) {
@@ -585,6 +585,12 @@ std::optional<snapshot::metadata> snapshot_cursor::next()
             deserialize_timestamp(std::get<2>(tuple))
         };
     });
+}
+
+snapshot_cursor::snapshot_cursor(database& db)
+    : cursor(db.connection.prepare(
+          "SELECT name, start_time, end_time FROM snapshots ORDER BY start_time DESC;"))
+{
 }
 
 
