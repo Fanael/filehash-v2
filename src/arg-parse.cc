@@ -405,7 +405,7 @@ This operation is very thorough and thus very costly.)eof"
             string_arg<&full_diff_command::database_path>>::parse,
         "<DATABASE-PATH>",
         "Compare all consecutive snapshots",
-        R"eof(Compare all consecutive pairs of snapshots for potention hash mismatches.
+        R"eof(Compare all consecutive pairs of snapshots for potential hash mismatches.
 
 The snapshots are compared pairwise, starting from the oldest one by creation
 time, i.e. if the oldest snapshot is A, and the newest snapshot is D,
