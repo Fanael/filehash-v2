@@ -68,8 +68,8 @@ void apply_common_pragmas(sqlite::connection& connection)
 
 void check_application_id(sqlite::connection& connection)
 {
-    const auto id = std::get<0>(
-        connection.prepare("PRAGMA application_id;").get_single_row_always(sqlite::int_tag));
+    auto stmt = connection.prepare("PRAGMA application_id;");
+    const auto id = sqlite::single_column_cursor<sqlite::int_column_tag>(stmt).next_always();
     if(id != our_application_id) {
         throw error("Not a valid database file, wrong application_id: " + std::to_string(id));
     }
@@ -139,16 +139,6 @@ timespec deserialize_timestamp(span<const std::byte> bytes)
 }
 
 
-span<const std::byte> verify_hash_size(span<const std::byte> bytes)
-{
-    if(bytes.size_bytes() != sizeof(blake2sp4::result_type)) {
-        throw error("Invalid hash size found in database: " + std::to_string(bytes.size_bytes())
-            + " bytes");
-    }
-    return bytes;
-}
-
-
 timespec current_time() noexcept
 {
     timespec result;
@@ -162,15 +152,14 @@ sqlite::statement make_statement_lookup_statement(sqlite::connection& connection
     return connection.prepare("SELECT snapshot_id FROM snapshots WHERE name = ?;");
 }
 
-std::int64_t get_snapshot_id(sqlite::statement& lookup_statement, std::string_view name)
+std::int64_t get_snapshot_id(sqlite::statement& lookup_stmt, std::string_view name)
 {
-    lookup_statement.reset();
-    lookup_statement.bind(name);
-    if(const auto row = lookup_statement.get_single_row(sqlite::int_tag)) {
-        return std::get<0>(*row);
-    } else {
-        throw error(std::string("no snapshot named \"").append(name).append("\" found"));
+    lookup_stmt.reset();
+    lookup_stmt.bind(name);
+    if(const auto id = sqlite::single_column_cursor<sqlite::int_column_tag>(lookup_stmt).next()) {
+        return *id;
     }
+    throw error(std::string("no snapshot named \"").append(name).append("\" found"));
 }
 
 
@@ -182,19 +171,18 @@ std::uint_least64_t check_sqlite_integrity(sqlite::connection& connection,
     // integrity_check, there's no way to make it return *all* messages.
     // So limit the number of error messages to a thousand, because if
     // a database has more errors than that, it's likely unsalvageable.
-    auto cursor = connection.prepare("PRAGMA integrity_check(1000);").owning_cursor(
-        sqlite::string_tag);
+    sqlite::owning_cursor<std::string_view, sqlite::string_column_tag> cursor(
+        connection.prepare("PRAGMA integrity_check(1000);"));
     std::uint_least64_t total_errors = 0;
-    while(const auto row = cursor.next()) {
-        auto string = std::get<0>(*row);
+    while(const auto string = cursor.next()) {
         if(total_errors == 0) {
-            if(string == std::string_view("ok")) {
+            if(*string == std::string_view("ok")) {
                 continue;
             }
             error_stream << "ERROR!\n";
         }
         ++total_errors;
-        error_stream << string << '\n' << std::flush;
+        error_stream << *string << '\n' << std::flush;
     }
     if(total_errors == 0) {
         error_stream << "ok\n";
@@ -205,20 +193,31 @@ std::uint_least64_t check_sqlite_integrity(sqlite::connection& connection,
 std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
     std::ostream& error_stream)
 {
+    struct foreign_key_violation {
+        std::string_view child_table_name;
+        std::optional<std::int64_t> rowid;
+        std::string_view parent_table_name;
+        std::int64_t constraint_id;
+    };
+    using cursor_type = sqlite::owning_cursor<foreign_key_violation,
+        sqlite::string_column_tag,
+        sqlite::nullable_int_column_tag,
+        sqlite::string_column_tag,
+        sqlite::int_column_tag>;
+
     error_stream << "Running PRAGMA foreign_key_check... " << std::flush;
-    auto cursor = connection.prepare("PRAGMA foreign_key_check;").owning_cursor(sqlite::string_tag,
-        sqlite::nullable_tag(sqlite::int_tag), sqlite::string_tag, sqlite::int_tag);
+    cursor_type cursor(connection.prepare("PRAGMA foreign_key_check;"));
     std::uint_least64_t total_errors = 0;
     while(const auto row = cursor.next()) {
         if(total_errors == 0) {
             error_stream << "ERROR!\n";
         }
         ++total_errors;
-        error_stream << "Foreign key constraint failed:\n  Child table: " << std::get<0>(*row)
-            << "\n  Parent table: " << std::get<2>(*row) << "\n  Foreign key ID: "
-            << std::get<3>(*row) << "\n  Child table rowid: ";
-        if(const auto rowid = std::get<1>(*row)) {
-            error_stream << *rowid;
+        error_stream << "Foreign key constraint failed:\n  Child table: " << row->child_table_name
+            << "\n  Parent table: " << row->parent_table_name << "\n  Foreign key ID: "
+            << row->constraint_id << "\n  Child table rowid: ";
+        if(row->rowid) {
+            error_stream << *row->rowid;
         } else {
             error_stream << "(NULL)";
         }
@@ -232,33 +231,38 @@ std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
 
 std::uint_least64_t check_file_hashes(sqlite::connection& connection, std::ostream& error_stream)
 {
-    using sqlite::blob_tag;
-    using sqlite::int_tag;
-    using sqlite::string_tag;
+    struct file_row {
+        std::int64_t snapshot_id;
+        std::int64_t path_id;
+        span<const std::byte> hash;
+    };
+    using file_cursor_type = sqlite::owning_cursor<file_row,
+        sqlite::int_column_tag,
+        sqlite::int_column_tag,
+        hash_column_tag>;
+    using chunk_hash_cursor_type = sqlite::owning_cursor<span<const std::byte>,
+        sqlite::blob_column_tag>;
 
     error_stream << "Looking for file hash mismatches... " << std::flush;
-    auto file_cursor = connection.prepare(
-        "SELECT snapshot_id, path_id, hash "
+    file_cursor_type file_cursor(connection.prepare("SELECT snapshot_id, path_id, hash "
         "FROM snapshot_files "
-        "JOIN hashes USING (hash_id);").owning_cursor(int_tag, int_tag, blob_tag);
-    auto file_chunk_cursor = connection.prepare(
+        "JOIN hashes USING (hash_id);"));
+    chunk_hash_cursor_type file_chunk_cursor(connection.prepare(
         "SELECT hash "
         "FROM file_chunks "
         "JOIN hashes USING (hash_id) "
         "WHERE snapshot_id = ? AND path_id = ? "
-        "ORDER BY chunk_id ASC;").owning_cursor(blob_tag);
+        "ORDER BY chunk_id ASC;"));
     std::uint_least64_t total_errors = 0;
     while(const auto file = file_cursor.next()) {
-        const auto snapshot_id = std::get<0>(*file);
-        const auto path_id = std::get<1>(*file);
-        const auto db_hash = verify_hash_size(std::get<2>(*file));
         file_chunk_cursor.rewind();
-        file_chunk_cursor.bind(snapshot_id, path_id);
+        file_chunk_cursor.bind(file->snapshot_id, file->path_id);
 
         blake2sp4 hash_engine;
         while(const auto chunk_hash = file_chunk_cursor.next()) {
-            hash_engine.update(verify_hash_size(std::get<0>(*chunk_hash)));
+            hash_engine.update(*chunk_hash);
         }
+        const auto db_hash = file->hash;
         const auto actual_hash = hash_engine.finalize();
         if(std::equal(db_hash.begin(), db_hash.end(), actual_hash.begin(), actual_hash.end())) {
             continue;
@@ -268,22 +272,14 @@ std::uint_least64_t check_file_hashes(sqlite::connection& connection, std::ostre
             error_stream << "ERROR!\n";
         }
         ++total_errors;
-        error_stream << "The hash of file ID " << path_id << " in snapshot ID " << snapshot_id
-            << " doesn't match the hash of its chunks' hashes.\n" << std::flush;
+        error_stream << "The hash of file ID " << file->path_id << " in snapshot ID "
+            << file->snapshot_id << " doesn't match the hash of its chunks' hashes.\n"
+            << std::flush;
     }
     if(total_errors == 0) {
         error_stream << "ok\n";
     }
     return total_errors;
-}
-
-
-template <typename T, typename Func>
-auto map_opt(const std::optional<T>& opt, Func&& function)
-{
-    return opt
-        ? std::optional(std::forward<Func>(function)(*opt))
-        : std::nullopt;
 }
 
 } // unnamed namespace
@@ -425,7 +421,8 @@ bool database::remove_snapshot(std::string_view name)
 snapshot_cursor database::open_snapshot_cursor()
 {
     start_transaction_if_needed();
-    return snapshot_cursor(*this);
+    return snapshot_cursor(connection.prepare(
+        "SELECT name, start_time, end_time FROM snapshots ORDER BY start_time DESC;"));
 }
 
 diff database::open_diff(std::string_view old_snapshot_name, std::string_view new_snapshot_name)
@@ -440,7 +437,37 @@ diff database::open_diff(std::string_view old_snapshot_name, std::string_view ne
 full_diff_mismatched_files_cursor database::open_full_diff()
 {
     start_transaction_if_needed();
-    return full_diff_mismatched_files_cursor(*this);
+    return full_diff_mismatched_files_cursor(connection.prepare(R"eof(
+SELECT
+  sids.snapshot_id AS old_snapshot_id,
+  sids.successor_id AS new_snapshot_id,
+  sids.name AS old_snapshot_name,
+  sids.successor_name AS new_snapshot_name,
+  old_s.path_id AS path_id,
+  p.path AS path,
+  old_s.mod_time AS modification_time,
+  old_h.hash AS old_hash,
+  new_h.hash AS new_hash
+FROM (
+  SELECT *
+  FROM (
+    SELECT
+      snapshot_id,
+      LEAD(snapshot_id) OVER w AS successor_id,
+      name,
+      LEAD(name) OVER w AS successor_name
+    FROM snapshots
+    WINDOW w AS (ORDER BY start_time ASC))
+  WHERE successor_id IS NOT NULL) AS sids
+JOIN snapshot_files AS old_s ON old_s.snapshot_id = sids.snapshot_id
+JOIN snapshot_files AS new_s
+  ON new_s.snapshot_id = sids.successor_id
+ AND old_s.path_id = new_s.path_id
+ AND old_s.mod_time = new_s.mod_time
+ AND old_s.hash_id <> new_s.hash_id
+JOIN paths AS p ON old_s.path_id = p.path_id
+JOIN hashes AS old_h ON old_s.hash_id = old_h.hash_id
+JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id;)eof"));
 }
 
 mismatched_chunks_cursor database::open_chunk_mismatch_cursor()
@@ -576,59 +603,35 @@ void hash_inserter::finalize_file(std::int64_t file_id, const timespec& file_mod
 }
 
 
-std::optional<snapshot::metadata> snapshot_cursor::next()
-{
-    return map_opt(cursor.next(), [&](const auto& tuple) {
-        return snapshot::metadata{
-            std::get<0>(tuple),
-            deserialize_timestamp(std::get<1>(tuple)),
-            deserialize_timestamp(std::get<2>(tuple))
-        };
-    });
-}
-
-snapshot_cursor::snapshot_cursor(database& db)
-    : cursor(db.connection.prepare(
-          "SELECT name, start_time, end_time FROM snapshots ORDER BY start_time DESC;"))
-{
-}
-
-
 auto diff::get_file_counts() -> file_counts
 {
-    using sqlite::int_tag;
-
     auto stmt = parent->connection.prepare(R"eof(
 SELECT
-  COALESCE(SUM(old_s.mod_time = new_s.mod_time), 0) AS same_files,
-  COALESCE(SUM(old_s.mod_time <> new_s.mod_time), 0) AS modified_files,
-  COALESCE(SUM(new_s.mod_time IS NULL), 0) AS deleted_files,
-  (SELECT COUNT(*) FROM snapshot_files WHERE snapshot_id = ?) AS old_snapshot_files,
-  (SELECT COUNT(*) FROM snapshot_files WHERE snapshot_id = ?) AS new_snapshot_files
-FROM snapshot_files AS old_s
-LEFT JOIN snapshot_files AS new_s ON new_s.snapshot_id = ?2 AND old_s.path_id = new_s.path_id
-WHERE old_s.snapshot_id = ?1;)eof");
+  same_files,
+  modified_files,
+  deleted_files,
+  new_snapshot_files - old_snapshot_files + deleted_files
+FROM (
+  SELECT
+    COALESCE(SUM(old_s.mod_time = new_s.mod_time), 0) AS same_files,
+    COALESCE(SUM(old_s.mod_time <> new_s.mod_time), 0) AS modified_files,
+    COALESCE(SUM(new_s.mod_time IS NULL), 0) AS deleted_files,
+    (SELECT COUNT(*) FROM snapshot_files WHERE snapshot_id = ?) AS old_snapshot_files,
+    (SELECT COUNT(*) FROM snapshot_files WHERE snapshot_id = ?) AS new_snapshot_files
+  FROM snapshot_files AS old_s
+  LEFT JOIN snapshot_files AS new_s ON new_s.snapshot_id = ?2 AND old_s.path_id = new_s.path_id
+  WHERE old_s.snapshot_id = ?1);)eof");
     stmt.bind(old_snapshot_id, new_snapshot_id);
-    const auto row = stmt.get_single_row_always(int_tag, int_tag, int_tag, int_tag, int_tag);
-    return {
-        std::get<0>(row),
-        std::get<1>(row),
-        std::get<2>(row),
-        std::get<4>(row) - std::get<3>(row) + std::get<2>(row)
-    };
+    return sqlite::row_cursor<file_counts,
+        sqlite::int_column_tag,
+        sqlite::int_column_tag,
+        sqlite::int_column_tag,
+        sqlite::int_column_tag>(stmt).next_always();
 }
 
-diff::diff(std::int64_t old_snapshot_id, std::int64_t new_snapshot_id, database& db)
-    : old_snapshot_id(old_snapshot_id),
-      new_snapshot_id(new_snapshot_id),
-      parent(&db)
+mismatched_files_cursor diff::open_file_mismatch_cursor()
 {
-}
-
-
-mismatched_files_cursor::mismatched_files_cursor(diff& d)
-    : cursor([&]{
-        auto stmt = d.parent->connection.prepare(R"eof(
+    auto stmt = parent->connection.prepare(R"eof(
 SELECT
   old_s.path_id AS path_id,
   p.path AS path,
@@ -645,31 +648,24 @@ JOIN hashes AS old_h ON old_s.hash_id = old_h.hash_id
 JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id
 WHERE old_s.snapshot_id = ?
   AND new_s.snapshot_id = ?;)eof");
-        stmt.bind(d.old_snapshot_id, d.new_snapshot_id);
-        return stmt;
-    }())
+    stmt.bind(old_snapshot_id, new_snapshot_id);
+    return mismatched_files_cursor(std::move(stmt));
+}
+
+mismatched_chunks_cursor diff::open_chunk_mismatch_cursor()
+{
+    mismatched_chunks_cursor result(*parent);
+    result.cursor.bind(old_snapshot_id, new_snapshot_id);
+    return result;
+}
+
+diff::diff(std::int64_t old_snapshot_id, std::int64_t new_snapshot_id, database& db)
+    : old_snapshot_id(old_snapshot_id),
+      new_snapshot_id(new_snapshot_id),
+      parent(&db)
 {
 }
 
-auto mismatched_files_cursor::next() -> std::optional<row_type>
-{
-    return map_opt(cursor.next(), [&](const auto& tuple) {
-        return row_type{
-            std::get<0>(tuple),
-            std::get<1>(tuple),
-            deserialize_timestamp(std::get<2>(tuple)),
-            verify_hash_size(std::get<3>(tuple)),
-            verify_hash_size(std::get<4>(tuple))
-        };
-    });
-}
-
-
-mismatched_chunks_cursor::mismatched_chunks_cursor(diff& d)
-    : mismatched_chunks_cursor(*d.parent)
-{
-    cursor.bind(d.old_snapshot_id, d.new_snapshot_id);
-}
 
 void mismatched_chunks_cursor::rewind_to_file(std::int64_t file_id)
 {
@@ -686,13 +682,7 @@ void mismatched_chunks_cursor::rewind_to_file_in(std::int64_t file_id, std::int6
 
 auto mismatched_chunks_cursor::next() -> std::optional<row_type>
 {
-    return map_opt(cursor.next(), [&](const auto& tuple) {
-        return row_type{
-            std::get<0>(tuple),
-            verify_hash_size(std::get<1>(tuple)),
-            verify_hash_size(std::get<2>(tuple))
-        };
-    });
+    return cursor.next();
 }
 
 mismatched_chunks_cursor::mismatched_chunks_cursor(database& db)
@@ -715,56 +705,18 @@ WHERE old_s.snapshot_id = ?
 }
 
 
-auto full_diff_mismatched_files_cursor::next() -> std::optional<row_type>
+auto timestamp_column_tag::transform(span<const std::byte> blob) -> column_type
 {
-    return map_opt(cursor.next(), [&](const auto& tuple) {
-        return row_type{
-            std::get<0>(tuple),
-            std::get<1>(tuple),
-            std::get<2>(tuple),
-            std::get<3>(tuple),
-            std::get<4>(tuple),
-            std::get<5>(tuple),
-            deserialize_timestamp(std::get<6>(tuple)),
-            verify_hash_size(std::get<7>(tuple)),
-            verify_hash_size(std::get<8>(tuple))
-        };
-    });
+    return deserialize_timestamp(blob);
 }
 
-full_diff_mismatched_files_cursor::full_diff_mismatched_files_cursor(database& db)
-    : cursor(db.connection.prepare(R"eof(
-SELECT
-  sids.snapshot_id AS old_snapshot_id,
-  sids.successor_id AS new_snapshot_id,
-  sids.name AS old_snapshot_name,
-  sids.successor_name AS new_snapshot_name,
-  old_s.path_id AS path_id,
-  p.path AS path,
-  old_s.mod_time AS modification_time,
-  old_h.hash AS old_hash,
-  new_h.hash AS new_hash
-FROM (
-  SELECT *
-  FROM (
-    SELECT
-      snapshot_id,
-      LEAD(snapshot_id) OVER w AS successor_id,
-      name,
-      LEAD(name) OVER w AS successor_name
-    FROM snapshots
-    WINDOW w AS (ORDER BY start_time ASC))
-  WHERE successor_id IS NOT NULL) AS sids
-JOIN snapshot_files AS old_s ON old_s.snapshot_id = sids.snapshot_id
-JOIN snapshot_files AS new_s
-  ON new_s.snapshot_id = sids.successor_id
- AND old_s.path_id = new_s.path_id
- AND old_s.mod_time = new_s.mod_time
- AND old_s.hash_id <> new_s.hash_id
-JOIN paths AS p ON old_s.path_id = p.path_id
-JOIN hashes AS old_h ON old_s.hash_id = old_h.hash_id
-JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id;)eof"))
+auto hash_column_tag::transform(span<const std::byte> blob) -> column_type
 {
+    const auto blob_size = blob.size_bytes();
+    if(blob_size != sizeof(blake2sp4::result_type)) {
+        throw error("Invalid hash size found in database: " + std::to_string(blob_size) + " bytes");
+    }
+    return blob;
 }
 
 } // namespace filehash::db

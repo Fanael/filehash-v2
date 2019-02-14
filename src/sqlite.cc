@@ -159,20 +159,20 @@ void statement::check_column_count(std::size_t column_count) const
 
 // NB: getters don't check column_id because it's checked ahead of time when
 // creating a cursor.
-std::int64_t statement::get(int column_id, int_type_tag)
+std::int64_t statement::get(int column_id, int_column_tag)
 {
     check_column_for_null(handle.get(), column_id);
     return sqlite3_column_int64(handle.get(), column_id);
 }
 
-std::optional<std::int64_t> statement::get(int column_id, nullable_type_tag<int_type_tag>) noexcept
+std::optional<std::int64_t> statement::get(int column_id, nullable_int_column_tag) noexcept
 {
     return is_column_null(handle.get(), column_id)
         ? std::nullopt
         : std::optional(sqlite3_column_int64(handle.get(), column_id));
 }
 
-span<const std::byte> statement::get(int column_id, blob_type_tag)
+span<const std::byte> statement::get(int column_id, blob_column_tag)
 {
     check_column_for_null(handle.get(), column_id);
     const auto data = sqlite3_column_blob(handle.get(), column_id);
@@ -183,7 +183,7 @@ span<const std::byte> statement::get(int column_id, blob_type_tag)
     return {static_cast<const std::byte*>(data), static_cast<unsigned>(size)};
 }
 
-std::string_view statement::get(int column_id, string_type_tag)
+std::string_view statement::get(int column_id, string_column_tag)
 {
     check_column_for_null(handle.get(), column_id);
     const auto data = sqlite3_column_text(handle.get(), column_id);
@@ -208,8 +208,8 @@ connection::connection(const char* file_name, open_mode mode)
 {
     // Check if it's really a new database that we just opened.
     if(mode == open_mode::create_new) {
-        const auto schema_version =
-            std::get<0>(prepare("PRAGMA schema_version;").get_single_row_always(int_tag));
+        auto stmt = prepare("PRAGMA schema_version;");
+        const auto schema_version = single_column_cursor<int_column_tag>(stmt).next_always();
         if(schema_version != 0) {
             throw_error("database already exists");
         }

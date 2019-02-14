@@ -36,12 +36,60 @@ class error final : public std::runtime_error {
 };
 
 class diff;
-class full_diff_mismatched_files_cursor;
 class hash_inserter;
 class mismatched_chunks_cursor;
-class mismatched_files_cursor;
-class snapshot_cursor;
 class snapshot;
+struct timestamp_column_tag;
+struct hash_column_tag;
+
+struct snapshot_metadata {
+    std::string_view name;
+    timespec start_time;
+    timespec end_time;
+};
+
+using snapshot_cursor = sqlite::owning_cursor<snapshot_metadata,
+    sqlite::string_column_tag,
+    timestamp_column_tag,
+    timestamp_column_tag>;
+
+struct mismatched_file {
+    std::int64_t file_id;
+    std::string_view file_path;
+    timespec modification_time;
+    span<const std::byte> old_hash;
+    span<const std::byte> new_hash;
+};
+
+using mismatched_files_cursor = sqlite::owning_cursor<mismatched_file,
+    sqlite::int_column_tag,
+    sqlite::string_column_tag,
+    timestamp_column_tag,
+    hash_column_tag,
+    hash_column_tag>;
+
+struct full_diff_mismatched_file {
+    std::int64_t old_snapshot_id;
+    std::int64_t new_snapshot_id;
+    std::string_view old_snapshot_name;
+    std::string_view new_snapshot_name;
+    std::int64_t file_id;
+    std::string_view file_path;
+    timespec modification_time;
+    span<const std::byte> old_hash;
+    span<const std::byte> new_hash;
+};
+
+using full_diff_mismatched_files_cursor = sqlite::owning_cursor<full_diff_mismatched_file,
+    sqlite::int_column_tag,
+    sqlite::int_column_tag,
+    sqlite::string_column_tag,
+    sqlite::string_column_tag,
+    sqlite::int_column_tag,
+    sqlite::string_column_tag,
+    timestamp_column_tag,
+    hash_column_tag,
+    hash_column_tag>;
 
 class database {
 public:
@@ -65,11 +113,8 @@ public:
     mismatched_chunks_cursor open_chunk_mismatch_cursor();
 private:
     friend class diff;
-    friend class full_diff_mismatched_files_cursor;
     friend class hash_inserter;
     friend class mismatched_chunks_cursor;
-    friend class mismatched_files_cursor;
-    friend class snapshot_cursor;
     friend class snapshot;
 
     void start_transaction_if_needed();
@@ -80,12 +125,6 @@ private:
 
 class snapshot {
 public:
-    struct metadata {
-        std::string_view name;
-        timespec start_time;
-        timespec end_time;
-    };
-
     hash_inserter start_update(std::size_t worker_id);
     void update_end_time();
 private:
@@ -121,18 +160,6 @@ private:
     std::int64_t snapshot_id;
 };
 
-class snapshot_cursor {
-public:
-    std::optional<snapshot::metadata> next();
-private:
-    friend class database;
-
-    explicit snapshot_cursor(database& db);
-
-    sqlite::owning_cursor<sqlite::string_type_tag, sqlite::blob_type_tag,
-        sqlite::blob_type_tag> cursor;
-};
-
 class diff {
 public:
     struct file_counts {
@@ -143,34 +170,16 @@ public:
     };
 
     file_counts get_file_counts();
+    mismatched_files_cursor open_file_mismatch_cursor();
+    mismatched_chunks_cursor open_chunk_mismatch_cursor();
 private:
     friend class database;
-    friend class mismatched_files_cursor;
-    friend class mismatched_chunks_cursor;
 
     explicit diff(std::int64_t old_snapshot_id, std::int64_t new_snapshot_id, database& db);
 
     std::int64_t old_snapshot_id;
     std::int64_t new_snapshot_id;
     database* parent;
-};
-
-class mismatched_files_cursor {
-public:
-    struct row_type {
-        std::int64_t file_id;
-        std::string_view file_path;
-        timespec modification_time;
-        span<const std::byte> old_hash;
-        span<const std::byte> new_hash;
-    };
-
-    explicit mismatched_files_cursor(diff& d);
-
-    std::optional<row_type> next();
-private:
-    sqlite::owning_cursor<sqlite::int_type_tag, sqlite::string_type_tag, sqlite::blob_type_tag,
-        sqlite::blob_type_tag, sqlite::blob_type_tag> cursor;
 };
 
 class mismatched_chunks_cursor {
@@ -181,51 +190,34 @@ public:
         span<const std::byte> new_hash;
     };
 
-    explicit mismatched_chunks_cursor(diff& d);
-
     void rewind_to_file(std::int64_t file_id);
     void rewind_to_file_in(std::int64_t file_id, std::int64_t old_snapshot_id,
         std::int64_t new_snapshot_id);
     std::optional<row_type> next();
 private:
     friend class database;
+    friend class diff;
 
     explicit mismatched_chunks_cursor(database& db);
 
-    sqlite::owning_cursor<sqlite::int_type_tag, sqlite::blob_type_tag,
-        sqlite::blob_type_tag> cursor;
+    sqlite::owning_cursor<row_type,
+        sqlite::int_column_tag,
+        hash_column_tag,
+        hash_column_tag> cursor;
 };
 
-class full_diff_mismatched_files_cursor {
-public:
-    struct row_type {
-        std::int64_t old_snapshot_id;
-        std::int64_t new_snapshot_id;
-        std::string_view old_snapshot_name;
-        std::string_view new_snapshot_name;
-        std::int64_t file_id;
-        std::string_view file_path;
-        timespec modification_time;
-        span<const std::byte> old_hash;
-        span<const std::byte> new_hash;
-    };
+struct timestamp_column_tag {
+    using raw_tag = sqlite::blob_column_tag;
+    using column_type = timespec;
 
-    std::optional<row_type> next();
-private:
-    friend class database;
+    static column_type transform(span<const std::byte> blob);
+};
 
-    explicit full_diff_mismatched_files_cursor(database& db);
+struct hash_column_tag {
+    using raw_tag = sqlite::blob_column_tag;
+    using column_type = span<const std::byte>;
 
-    sqlite::owning_cursor<
-        sqlite::int_type_tag,
-        sqlite::int_type_tag,
-        sqlite::string_type_tag,
-        sqlite::string_type_tag,
-        sqlite::int_type_tag,
-        sqlite::string_type_tag,
-        sqlite::blob_type_tag,
-        sqlite::blob_type_tag,
-        sqlite::blob_type_tag> cursor;
+    static column_type transform(span<const std::byte> blob);
 };
 
 } // namespace filehash::db

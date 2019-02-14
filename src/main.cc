@@ -298,8 +298,8 @@ exit_status run_command(const args::diff_command& args, const args::common_args&
         << stats.deleted_files << '\n' << std::flush;
 
     bool found_mismatches = false;
-    db::mismatched_files_cursor file_cursor(diff);
-    db::mismatched_chunks_cursor chunk_cursor(diff);
+    auto file_cursor = diff.open_file_mismatch_cursor();
+    auto chunk_cursor = diff.open_chunk_mismatch_cursor();
     while(const auto file = file_cursor.next()) {
         found_mismatches = true;
         std::clog << "Mismatch detected for \"" << file->file_path << "\"!\n Modification time: "

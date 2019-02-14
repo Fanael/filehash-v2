@@ -22,8 +22,15 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
-#include <tuple>
 #include <utility>
+#include <boost/hana/ext/std/integer_sequence.hpp>
+#include <boost/hana/if.hpp>
+#include <boost/hana/integral_constant.hpp>
+#include <boost/hana/transform.hpp>
+#include <boost/hana/tuple.hpp>
+#include <boost/hana/type.hpp>
+#include <boost/hana/unpack.hpp>
+#include <boost/hana/zip_with.hpp>
 
 struct sqlite3;
 struct sqlite3_stmt;
@@ -40,53 +47,39 @@ public:
     explicit error(const char* message);
 };
 
-struct int_type_tag {
-    using column_type = std::int64_t;
+template <typename ColumnType>
+struct basic_column_tag {
+    using raw_tag = basic_column_tag;
+    using column_type = ColumnType;
 };
 
-struct blob_type_tag {
-    using column_type = span<const std::byte>;
-};
-
-struct string_type_tag {
-    using column_type = std::string_view;
-};
-
-template <typename Tag>
-struct nullable_type_tag {
-    using column_type = std::optional<typename Tag::column_type>;
-};
-
-constexpr int_type_tag int_tag = {};
-constexpr blob_type_tag blob_tag = {};
-constexpr string_type_tag string_tag = {};
-
-template <typename Tag>
-constexpr nullable_type_tag<Tag> nullable_tag(Tag) noexcept
-{
-    return {};
-}
+using int_column_tag =  basic_column_tag<std::int64_t>;
+using blob_column_tag = basic_column_tag<span<const std::byte>>;
+using string_column_tag = basic_column_tag<std::string_view>;
+using nullable_int_column_tag = basic_column_tag<std::optional<std::int64_t>>;
 
 class statement;
-template <typename... Tags>
+template <typename RowType, typename... ColumnTags>
 class owning_cursor;
 
-template <typename... Tags>
+template <typename RowType, typename... ColumnTags>
 class row_cursor {
 public:
-    using row_type = std::tuple<typename Tags::column_type...>;
+    explicit row_cursor(statement& stmt);
 
-    std::optional<row_type> next();
+    std::optional<RowType> next();
+    RowType next_always();
 private:
-    friend class statement;
-    friend class owning_cursor<Tags...>;
+    friend class owning_cursor<RowType, ColumnTags...>;
 
-    explicit row_cursor(statement& stmt) noexcept;
-    template <std::size_t... Idxs>
-    row_type get_columns(std::index_sequence<Idxs...>);
+    struct unchecked_tag {};
+    explicit row_cursor(statement& stmt, unchecked_tag) noexcept;
 
     statement* parent;
 };
+
+template <typename ColumnTag>
+using single_column_cursor = row_cursor<typename ColumnTag::column_type, ColumnTag>;
 
 class statement {
 public:
@@ -98,19 +91,11 @@ public:
     void bind_one(int parameter_id, std::string_view value);
     template <typename... Args>
     void bind(Args&&... args);
-    template <typename... Tags>
-    row_cursor<Tags...> cursor(Tags...);
-    template <typename... Tags>
-    owning_cursor<Tags...> owning_cursor(Tags...) &&;
-    template <typename... Tags>
-    std::optional<typename row_cursor<Tags...>::row_type> get_single_row(Tags...);
-    template <typename... Tags>
-    typename row_cursor<Tags...>::row_type get_single_row_always(Tags...);
 private:
     friend class connection;
-    template <typename...>
+    template <typename, typename...>
     friend class row_cursor;
-    template <typename...>
+    template <typename, typename...>
     friend class owning_cursor;
 
     explicit statement(sqlite3_stmt* statement) noexcept;
@@ -120,10 +105,10 @@ private:
 
     // Note that the result for blobs and strings is only guaranteed to live
     // until the next call to reset and/or step.
-    std::int64_t get(int column_id, int_type_tag);
-    std::optional<std::int64_t> get(int column_id, nullable_type_tag<int_type_tag>) noexcept;
-    span<const std::byte> get(int column_id, blob_type_tag);
-    std::string_view get(int column_id, string_type_tag);
+    std::int64_t get(int column_id, int_column_tag);
+    std::optional<std::int64_t> get(int column_id, nullable_int_column_tag) noexcept;
+    span<const std::byte> get(int column_id, blob_column_tag);
+    std::string_view get(int column_id, string_column_tag);
 
     template <typename... Args, std::size_t... Idxs>
     void bind_impl(std::index_sequence<Idxs...>, Args&&... args);
@@ -134,11 +119,9 @@ private:
     std::unique_ptr<sqlite3_stmt, deleter> handle;
 };
 
-template <typename... Tags>
+template <typename RowType, typename... ColumnTags>
 class owning_cursor {
 public:
-    using row_type = typename row_cursor<Tags...>::row_type;
-
     explicit owning_cursor(statement&& stmt);
 
     template <typename T>
@@ -146,7 +129,7 @@ public:
     template <typename... Args>
     void bind(Args&&... args);
     void rewind() noexcept;
-    std::optional<row_type> next();
+    std::optional<RowType> next();
 private:
     statement stmt;
 };
@@ -206,25 +189,66 @@ private:
 };
 
 
-template <typename... Tags>
-auto row_cursor<Tags...>::next() -> std::optional<row_type>
+template <typename RowType, typename... ColumnTags>
+row_cursor<RowType, ColumnTags...>::row_cursor(statement& stmt)
+    : parent([&] { stmt.check_column_count(sizeof...(ColumnTags)); return &stmt; }())
 {
-    return parent->step()
-        ? std::optional(get_columns(std::make_index_sequence<sizeof...(Tags)>()))
-        : std::nullopt;
 }
 
-template <typename... Tags>
-row_cursor<Tags...>::row_cursor(statement& stmt) noexcept
+template <typename RowType, typename... ColumnTags>
+std::optional<RowType> row_cursor<RowType, ColumnTags...>::next()
+{
+    if(!parent->step()) {
+        return std::nullopt;
+    }
+
+    namespace hana = boost::hana;
+    constexpr auto column_tags = hana::make_tuple(hana::type_c<ColumnTags>...);
+    // Get the raw values of each column first.
+    const auto get_row = [&](const auto& index, const auto& raw_tag_type) {
+        return parent->get(index.value, typename decltype(+raw_tag_type)::type{});
+    };
+    const auto raw_column_values = hana::zip_with(get_row,
+        hana::unpack(std::index_sequence_for<ColumnTags...>{},
+            [](const auto&... x) { return hana::make_tuple(x...); }),
+        hana::transform(column_tags,
+            [](const auto& tag) {return hana::type_c<typename decltype(+tag)::type::raw_tag>;}));
+    // Apply the transformer if one exists, otherwise return the column value
+    // unchanged.
+    constexpr auto has_transform = hana::is_valid(
+        [](const auto& tag) -> decltype(static_cast<void>(&decltype(+tag)::type::transform)) {});
+    constexpr auto identity = [](const auto&, auto&& arg) {
+        return std::forward<decltype(arg)>(arg);
+    };
+    const auto transform_column = [](const auto& tag, auto&& arg) {
+        return decltype(+tag)::type::transform(std::forward<decltype(arg)>(arg));
+    };
+    const auto transform_column_if_needed = [&](const auto& tag, auto&& value) {
+        return hana::if_(has_transform(tag), transform_column, identity)(
+            tag, std::forward<decltype(value)>(value));
+    };
+    const auto transformed_values = hana::zip_with(transform_column_if_needed, column_tags,
+        raw_column_values);
+    // Transformation went well, we can return the row.
+    return std::optional(hana::unpack(transformed_values, [](auto&&... args) -> RowType {
+        return RowType{std::forward<decltype(args)>(args)...};
+    }));
+}
+
+template <typename RowType, typename... ColumnTags>
+RowType row_cursor<RowType, ColumnTags...>::next_always()
+{
+    auto row = next();
+    if(!row) {
+        parent->throw_no_rows_error();
+    }
+    return *std::move(row);
+}
+
+template <typename RowType, typename... ColumnTags>
+row_cursor<RowType, ColumnTags...>::row_cursor(statement& stmt, unchecked_tag) noexcept
     : parent(&stmt)
 {
-}
-
-template <typename... Tags>
-template <std::size_t... Idxs>
-auto row_cursor<Tags...>::get_columns(std::index_sequence<Idxs...>) -> row_type
-{
-    return row_type(parent->get(Idxs, Tags{})...);
 }
 
 
@@ -234,38 +258,6 @@ void statement::bind(Args&&... args)
     bind_impl(std::make_index_sequence<sizeof...(Args)>(), std::forward<Args>(args)...);
 }
 
-template <typename... Tags>
-row_cursor<Tags...> statement::cursor(Tags...)
-{
-    check_column_count(sizeof...(Tags));
-    return row_cursor<Tags...>(*this);
-}
-
-template <typename ... Tags>
-owning_cursor<Tags...> statement::owning_cursor(Tags...) &&
-{
-    // Necessary to distinguish between owning_cursor the class
-    // and owning_cursor the member function.
-    using cursor_type = class owning_cursor<Tags...>;
-    return cursor_type(std::move(*this));
-}
-
-template <typename... Tags>
-std::optional<typename row_cursor<Tags...>::row_type> statement::get_single_row(Tags...)
-{
-    return cursor(Tags{}...).next();
-}
-
-template <typename... Tags>
-typename row_cursor<Tags...>::row_type statement::get_single_row_always(Tags...)
-{
-    auto opt = get_single_row(Tags{}...);
-    if(!opt) {
-        throw_no_rows_error();
-    }
-    return *std::move(opt);
-}
-
 template <typename... Args, std::size_t... Idxs>
 void statement::bind_impl(std::index_sequence<Idxs...>, Args&&... args)
 {
@@ -273,36 +265,37 @@ void statement::bind_impl(std::index_sequence<Idxs...>, Args&&... args)
 }
 
 
-template <typename... Tags>
-owning_cursor<Tags...>::owning_cursor(statement&& stmt)
-    : stmt([&]{ stmt.check_column_count(sizeof...(Tags)); return std::move(stmt); }())
+template <typename RowType, typename... ColumnTags>
+owning_cursor<RowType, ColumnTags...>::owning_cursor(statement&& stmt)
+    : stmt([&]{ stmt.check_column_count(sizeof...(ColumnTags)); return std::move(stmt); }())
 {
 }
 
-template <typename... Tags>
+template <typename RowType, typename... ColumnTags>
 template <typename T>
-void owning_cursor<Tags...>::bind_one(int parameter_id, T&& value)
+void owning_cursor<RowType, ColumnTags...>::bind_one(int parameter_id, T&& value)
 {
     stmt.bind_one(parameter_id, std::forward<T>(value));
 }
 
-template <typename... Tags>
+template <typename RowType, typename... ColumnTags>
 template <typename... Args>
-void owning_cursor<Tags...>::bind(Args&&... args)
+void owning_cursor<RowType, ColumnTags...>::bind(Args&&... args)
 {
     stmt.bind(std::forward<Args>(args)...);
 }
 
-template <typename... Tags>
-void owning_cursor<Tags...>::rewind() noexcept
+template <typename RowType, typename... ColumnTags>
+void owning_cursor<RowType, ColumnTags...>::rewind() noexcept
 {
     stmt.reset();
 }
 
-template <typename... Tags>
-auto owning_cursor<Tags...>::next() -> std::optional<row_type>
+template <typename RowType, typename... ColumnTags>
+std::optional<RowType> owning_cursor<RowType, ColumnTags...>::next()
 {
-    return row_cursor<Tags...>(stmt).next();
+    using cursor_impl = row_cursor<RowType, ColumnTags...>;
+    return cursor_impl(stmt, typename cursor_impl::unchecked_tag{}).next();
 }
 
 } // namespace filehash::sqlite
