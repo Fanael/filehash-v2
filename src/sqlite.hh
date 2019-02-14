@@ -25,7 +25,6 @@
 #include <utility>
 #include <boost/hana/functional/arg.hpp>
 #include <boost/hana/if.hpp>
-#include <boost/hana/integral_constant.hpp>
 #include <boost/hana/range.hpp>
 #include <boost/hana/transform.hpp>
 #include <boost/hana/tuple.hpp>
