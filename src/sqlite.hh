@@ -23,10 +23,10 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
-#include <boost/hana/ext/std/integer_sequence.hpp>
 #include <boost/hana/functional/arg.hpp>
 #include <boost/hana/if.hpp>
 #include <boost/hana/integral_constant.hpp>
+#include <boost/hana/range.hpp>
 #include <boost/hana/transform.hpp>
 #include <boost/hana/tuple.hpp>
 #include <boost/hana/type.hpp>
@@ -210,7 +210,7 @@ std::optional<RowType> row_cursor<RowType, ColumnTags...>::next()
         return parent->get(index.value, typename decltype(+raw_tag_type)::type{});
     };
     const auto raw_column_values = hana::zip_with(get_row,
-        hana::unpack(std::index_sequence_for<ColumnTags...>{}, hana::make_tuple),
+        hana::to_tuple(hana::range_c<std::size_t, 0, sizeof...(ColumnTags)>),
         hana::transform(column_tags,
             [](const auto& tag) {return hana::type_c<typename decltype(+tag)::type::raw_tag>;}));
     // Apply the transformer if one exists, otherwise return the column value
