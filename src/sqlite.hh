@@ -209,8 +209,7 @@ std::optional<RowType> row_cursor<RowType, ColumnTags...>::next()
         return parent->get(index.value, typename decltype(+raw_tag_type)::type{});
     };
     const auto raw_column_values = hana::zip_with(get_row,
-        hana::unpack(std::index_sequence_for<ColumnTags...>{},
-            [](const auto&... x) { return hana::make_tuple(x...); }),
+        hana::unpack(std::index_sequence_for<ColumnTags...>{}, hana::make_tuple),
         hana::transform(column_tags,
             [](const auto& tag) {return hana::type_c<typename decltype(+tag)::type::raw_tag>;}));
     // Apply the transformer if one exists, otherwise return the column value
