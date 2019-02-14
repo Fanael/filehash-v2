@@ -204,7 +204,7 @@ std::optional<RowType> row_cursor<RowType, ColumnTags...>::next()
     }
 
     namespace hana = boost::hana;
-    constexpr auto column_tags = hana::make_tuple(hana::type_c<ColumnTags>...);
+    constexpr auto column_tags = hana::tuple_t<ColumnTags...>;
     // Get the raw values of each column first.
     const auto get_row = [&](const auto& index, const auto& raw_tag_type) {
         return parent->get(index.value, typename decltype(+raw_tag_type)::type{});
