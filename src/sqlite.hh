@@ -24,6 +24,7 @@
 #include <string_view>
 #include <utility>
 #include <boost/hana/ext/std/integer_sequence.hpp>
+#include <boost/hana/functional/arg.hpp>
 #include <boost/hana/if.hpp>
 #include <boost/hana/integral_constant.hpp>
 #include <boost/hana/transform.hpp>
@@ -216,14 +217,11 @@ std::optional<RowType> row_cursor<RowType, ColumnTags...>::next()
     // unchanged.
     constexpr auto has_transform = hana::is_valid(
         [](const auto& tag) -> decltype(static_cast<void>(&decltype(+tag)::type::transform)) {});
-    constexpr auto identity = [](const auto&, auto&& arg) {
-        return std::forward<decltype(arg)>(arg);
-    };
     const auto transform_column = [](const auto& tag, auto&& arg) {
         return decltype(+tag)::type::transform(std::forward<decltype(arg)>(arg));
     };
     const auto transform_column_if_needed = [&](const auto& tag, auto&& value) {
-        return hana::if_(has_transform(tag), transform_column, identity)(
+        return hana::if_(has_transform(tag), transform_column, hana::arg<2>)(
             tag, std::forward<decltype(value)>(value));
     };
     const auto transformed_values = hana::zip_with(transform_column_if_needed, column_tags,
