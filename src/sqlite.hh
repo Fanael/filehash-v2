@@ -205,21 +205,21 @@ std::optional<RowType> row_cursor<RowType, ColumnTags...>::next()
     namespace hana = boost::hana;
     constexpr auto column_tags = hana::tuple_t<ColumnTags...>;
     // Get the raw values of each column first.
-    const auto get_row = [&](const auto& index, const auto& raw_tag_type) {
-        return parent->get(index.value, typename decltype(+raw_tag_type)::type{});
+    const auto get_row = [&](const auto& index, auto raw_tag) {
+        return parent->get(index.value, typename decltype(raw_tag)::type{});
     };
     auto raw_column_values = hana::zip_with(get_row,
         hana::to_tuple(hana::range_c<std::size_t, 0, sizeof...(ColumnTags)>),
         hana::transform(column_tags,
-            [](const auto& tag) {return hana::type_c<typename decltype(+tag)::type::raw_tag>;}));
+            [](auto tag) { return hana::type_c<typename decltype(tag)::type::raw_tag>; }));
     // Apply the transformer if one exists, otherwise return the column value
     // unchanged.
     constexpr auto has_transform = hana::is_valid(
-        [](const auto& tag) -> decltype(static_cast<void>(&decltype(+tag)::type::transform)) {});
-    const auto transform_column = [](const auto& tag, auto&& arg) {
-        return decltype(+tag)::type::transform(std::forward<decltype(arg)>(arg));
+        [](auto tag) -> decltype(static_cast<void>(&decltype(tag)::type::transform)) {});
+    const auto transform_column = [](auto tag, auto&& arg) {
+        return decltype(tag)::type::transform(std::forward<decltype(arg)>(arg));
     };
-    const auto transform_column_if_needed = [&](const auto& tag, auto&& value) {
+    const auto transform_column_if_needed = [&](auto tag, auto&& value) {
         return hana::if_(has_transform(tag), transform_column, hana::arg<2>)(
             tag, std::forward<decltype(value)>(value));
     };
