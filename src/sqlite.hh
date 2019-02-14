@@ -209,7 +209,7 @@ std::optional<RowType> row_cursor<RowType, ColumnTags...>::next()
     const auto get_row = [&](const auto& index, const auto& raw_tag_type) {
         return parent->get(index.value, typename decltype(+raw_tag_type)::type{});
     };
-    const auto raw_column_values = hana::zip_with(get_row,
+    auto raw_column_values = hana::zip_with(get_row,
         hana::to_tuple(hana::range_c<std::size_t, 0, sizeof...(ColumnTags)>),
         hana::transform(column_tags,
             [](const auto& tag) {return hana::type_c<typename decltype(+tag)::type::raw_tag>;}));
@@ -224,10 +224,10 @@ std::optional<RowType> row_cursor<RowType, ColumnTags...>::next()
         return hana::if_(has_transform(tag), transform_column, hana::arg<2>)(
             tag, std::forward<decltype(value)>(value));
     };
-    const auto transformed_values = hana::zip_with(transform_column_if_needed, column_tags,
-        raw_column_values);
+    auto transformed_values = hana::zip_with(transform_column_if_needed, column_tags,
+        std::move(raw_column_values));
     // Transformation went well, we can return the row.
-    return std::optional(hana::unpack(transformed_values, [](auto&&... args) -> RowType {
+    return std::optional(hana::unpack(std::move(transformed_values), [](auto&&... args) -> RowType {
         return RowType{std::forward<decltype(args)>(args)...};
     }));
 }
