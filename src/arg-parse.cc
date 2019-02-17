@@ -431,7 +431,7 @@ If a snapshot name of either name doesn't exist, the command will fail.)eof"
         command_parser_impl<gc_command,
             string_arg<&gc_command::database_path>>::parse,
         "<DATABASE-PATH>",
-        "Cleanup a database",
+        "Vacuum a database",
         R"eof(Remove unused objects from the database and shrink it.
 
 Normally removing snapshots from the database will not shrink it, the space
@@ -453,7 +453,7 @@ so it will fail if the file system is short on free space.)eof"
         command_parser_impl<help_command,
             command_name_opt_arg<&help_command::cookie>>::parse,
         "[<COMMAND>]",
-        "Show detailed information",
+        "Show detailed usage information",
         R"eof(If a command name is passed, bring up detailed information about
 the speficied command.
 
@@ -670,7 +670,7 @@ std::ostream& operator<<(std::ostream& stream, const usage& u)
         }
         stream << "\nTo get more information about a command, use " << u.program_name
             << " help <COMMAND>\n\n";
-        stream << "Program exit code meanings:\n";
+        stream << "Program exit codes and their meanings:\n";
         for(const auto& exit_code: exit_codes) {
             stream << ' ' << exit_code.value << ": " << exit_code.description << '\n';
         }
