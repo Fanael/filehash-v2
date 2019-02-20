@@ -16,6 +16,7 @@
 // along with filehash-v2.  If not, see <https://www.gnu.org/licenses/>.
 #include <cstddef>
 #include <exception>
+#include <mutex>
 #include <string>
 #include <sqlite3.h>
 #include "compiler.hh"
@@ -29,10 +30,45 @@ error::error(const char* message)
 {
 }
 
+error::error(const std::string& message)
+    : std::runtime_error(message)
+{
+}
+
 
 namespace {
 
+class sqlite_mutex_ref {
+public:
+    // Null pointers are valid and will result in no locking.
+    constexpr explicit sqlite_mutex_ref(sqlite3_mutex* mutex) noexcept;
+    void lock() noexcept;
+    void unlock() noexcept;
+private:
+    sqlite3_mutex* mutex;
+};
+
+constexpr sqlite_mutex_ref::sqlite_mutex_ref(sqlite3_mutex* mutex) noexcept
+    : mutex(mutex)
+{
+}
+
+void sqlite_mutex_ref::lock() noexcept
+{
+    sqlite3_mutex_enter(mutex);
+}
+
+void sqlite_mutex_ref::unlock() noexcept
+{
+    sqlite3_mutex_leave(mutex);
+}
+
 [[noreturn]] void throw_error(const char* message)
+{
+    throw error(message);
+}
+
+[[noreturn]] void throw_error(const std::string& message)
 {
     throw error(message);
 }
@@ -50,6 +86,15 @@ namespace {
 [[noreturn]] void throw_error(sqlite3_stmt* statement)
 {
     throw_error(sqlite3_db_handle(statement));
+}
+
+[[noreturn]] void throw_error(sqlite3* db, std::unique_lock<sqlite_mutex_ref> lock)
+{
+    std::string error_message = sqlite3_errmsg(db);
+    // We have copied the error message, now we can safely unlock the
+    // database mutex.
+    lock.unlock();
+    throw_error(error_message);
 }
 
 void initialize_sqlite()
@@ -104,12 +149,7 @@ bool statement::step()
     switch(status) {
     case SQLITE_DONE: return false;
     case SQLITE_ROW: return true;
-    default:
-        // If sqlite3_step fails, the precise error message may be set
-        // only in the statement object, not the database, and reset is what
-        // causes it to be copied to the database.
-        reset();
-        throw_error(handle.get());
+    default: throw_step_error();
     }
 }
 
@@ -142,6 +182,29 @@ void statement::bind_one(int parameter_id, std::string_view value)
 statement::statement(sqlite3_stmt* statement) noexcept
     : handle(statement)
 {
+}
+
+[[noreturn]] void statement::throw_step_error()
+{
+    // If sqlite3_step fails, the precise error message may be set only
+    // in the statement object, not the database, and reset is what causes
+    // it to be copied to the database.
+    //
+    // We also need to lock the database to make sure another thread doesn't
+    // overwrite the error message before we get a chance to save it. This
+    // is a race condition, but *not* a data race because SQLite uses mutexes
+    // internally.
+    //
+    // NB: if the database is not open in serialized mode, sqlite3_db_mutex
+    // will harmlessly return a null pointer, which will cause
+    // sqlite_mutex_ref do harmlessly do nothing. That's fine, because outside
+    // of serialized mode external locking is required to use the same
+    // database connection from multiple threads.
+    const auto database_handle = sqlite3_db_handle(handle.get());
+    sqlite_mutex_ref mutex(sqlite3_db_mutex(database_handle));
+    std::unique_lock lock(mutex);
+    reset();
+    throw_error(database_handle, std::move(lock));
 }
 
 [[noreturn]] void statement::throw_no_rows_error()
