@@ -25,14 +25,24 @@
 
 namespace filehash::sqlite {
 
-error::error(const char* message)
-    : std::runtime_error(message)
+error::error(int code, const char* message)
+    : std::runtime_error(message), error_code(code)
 {
 }
 
-error::error(const std::string& message)
-    : std::runtime_error(message)
+error::error(int code, const std::string& message)
+    : std::runtime_error(message), error_code(code)
 {
+}
+
+int error::code() const noexcept
+{
+    return error_code;
+}
+
+const char* error::code_message() const noexcept
+{
+    return sqlite3_errstr(error_code);
 }
 
 
@@ -63,33 +73,33 @@ void sqlite_mutex_ref::unlock() noexcept
     sqlite3_mutex_leave(mutex);
 }
 
-[[noreturn]] void throw_error(const char* message)
+[[noreturn]] void throw_error(int error_code, const char* message)
 {
-    throw error(message);
+    throw error(error_code, message);
 }
 
-[[noreturn]] void throw_error(const std::string& message)
+[[noreturn]] void throw_error(int error_code, const std::string& message)
 {
-    throw error(message);
+    throw error(error_code, message);
 }
 
 [[noreturn]] void throw_error(int error_code)
 {
-    throw_error(sqlite3_errstr(error_code));
+    throw_error(error_code, sqlite3_errstr(error_code));
 }
 
-[[noreturn]] void throw_error(sqlite3* db)
+[[noreturn]] void throw_error(int error_code, sqlite3* db)
 {
-    throw_error(sqlite3_errmsg(db));
+    throw_error(error_code, sqlite3_errmsg(db));
 }
 
-[[noreturn]] void throw_error(sqlite3* db, std::unique_lock<sqlite_mutex_ref> lock)
+[[noreturn]] void throw_error(int error_code, sqlite3* db, std::unique_lock<sqlite_mutex_ref> lock)
 {
     std::string error_message = sqlite3_errmsg(db);
     // We have copied the error message, now we can safely unlock the
     // database mutex.
     lock.unlock();
-    throw_error(error_message);
+    throw_error(error_code, error_message);
 }
 
 void initialize_sqlite()
@@ -127,7 +137,7 @@ bool is_column_null(sqlite3_stmt* statement, int column_id) noexcept
 void check_column_for_null(sqlite3_stmt* statement, int column_id)
 {
     if(is_column_null(statement, column_id)) {
-        throw_error("Unexpected NULL in a result row");
+        throw_error(SQLITE_CONSTRAINT_NOTNULL, "Unexpected NULL in a result row");
     }
 }
 
@@ -144,7 +154,7 @@ bool statement::step()
     switch(status) {
     case SQLITE_DONE: return false;
     case SQLITE_ROW: return true;
-    default: throw_step_error();
+    default: throw_step_error(status);
     }
 }
 
@@ -179,7 +189,7 @@ statement::statement(sqlite3_stmt* statement) noexcept
 {
 }
 
-[[noreturn]] void statement::throw_step_error()
+[[noreturn]] void statement::throw_step_error(int error_code)
 {
     // If sqlite3_step fails, the precise error message may be set only
     // in the statement object, not the database, and reset is what causes
@@ -199,12 +209,13 @@ statement::statement(sqlite3_stmt* statement) noexcept
     sqlite_mutex_ref mutex(sqlite3_db_mutex(database_handle));
     std::unique_lock lock(mutex);
     reset();
-    throw_error(database_handle, std::move(lock));
+    throw_error(error_code, database_handle, std::move(lock));
 }
 
 [[noreturn]] void statement::throw_no_rows_error()
 {
-    throw_error("no rows returned from a statement that should always return some");
+    throw_error(SQLITE_CONSTRAINT,
+        "no rows returned from a statement that should always return some");
 }
 
 void statement::check_column_count(std::size_t column_count) const
@@ -269,7 +280,7 @@ connection::connection(const char* file_name, open_mode mode)
         auto stmt = prepare("PRAGMA schema_version;");
         const auto schema_version = single_column_cursor<int_column_tag>(stmt).next_always();
         if(schema_version != 0) {
-            throw_error("database already exists");
+            throw_error(SQLITE_ERROR, "database already exists");
         }
     }
 }
@@ -278,7 +289,7 @@ void connection::set_busy_timeout(int milliseconds)
 {
     const auto status = sqlite3_busy_timeout(handle.get(), milliseconds);
     if(status != SQLITE_OK) {
-        throw_error(handle.get());
+        throw_error(status, handle.get());
     }
 }
 
@@ -316,16 +327,16 @@ statement connection::prepare(std::string_view sql)
     // SQLite takes the string length as an int for some reason, so check
     // if the length fits in an int.
     if(sql.size() > std::numeric_limits<int>::max()) {
-        throw_error("SQL string too long");
+        throw_error(SQLITE_TOOBIG, "SQL string too long");
     }
     sqlite3_stmt* stmt;
     const auto status = sqlite3_prepare_v2(handle.get(), sql.data(), static_cast<int>(sql.size()),
         &stmt, nullptr);
     if(status != SQLITE_OK) {
-        throw_error(handle.get());
+        throw_error(status, handle.get());
     }
     if(stmt == nullptr) {
-        throw_error("no SQL in prepared statement");
+        throw_error(SQLITE_MISUSE, "no SQL in prepared statement");
     }
     return statement(stmt);
 }
@@ -351,7 +362,7 @@ auto connection::open(const char* file_name, open_mode mode) -> std::unique_ptr<
     if(status == SQLITE_OK) {
         return connection;
     }
-    throw_error(connection.get());
+    throw_error(status, connection.get());
 }
 
 void connection::deleter::operator()(sqlite3* handle) const noexcept

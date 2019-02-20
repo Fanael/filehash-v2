@@ -44,8 +44,13 @@ namespace sqlite {
 
 class error : public std::runtime_error {
 public:
-    explicit error(const char* message);
-    explicit error(const std::string& message);
+    explicit error(int code, const char* message);
+    explicit error(int code, const std::string& message);
+
+    int code() const noexcept;
+    const char* code_message() const noexcept;
+private:
+    int error_code;
 };
 
 template <typename ColumnType>
@@ -101,7 +106,7 @@ private:
 
     explicit statement(sqlite3_stmt* statement) noexcept;
 
-    [[noreturn]] void throw_step_error();
+    [[noreturn]] void throw_step_error(int error_code);
     [[noreturn]] static void throw_no_rows_error();
     void check_column_count(std::size_t column_count) const;
 

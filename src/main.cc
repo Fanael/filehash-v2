@@ -443,7 +443,8 @@ exit_status run_command(const args::update_command& args, const args::common_arg
         std::clog << "Database error: " << e.what() << '\n';
         return exit_status::error;
     } catch(const sqlite::error& e) {
-        std::clog << "SQLite error: " << e.what() << '\n';
+        std::clog << "SQLite error: " << e.what() << " (code " << e.code() << ", "
+            << e.code_message() << ")\n";
         return exit_status::error;
     } catch(const std::exception& e) {
         std::clog << "Internal error: " << e.what() << '\n';
