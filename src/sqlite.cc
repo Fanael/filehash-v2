@@ -83,11 +83,6 @@ void sqlite_mutex_ref::unlock() noexcept
     throw_error(sqlite3_errmsg(db));
 }
 
-[[noreturn]] void throw_error(sqlite3_stmt* statement)
-{
-    throw_error(sqlite3_db_handle(statement));
-}
-
 [[noreturn]] void throw_error(sqlite3* db, std::unique_lock<sqlite_mutex_ref> lock)
 {
     std::string error_message = sqlite3_errmsg(db);
@@ -157,7 +152,7 @@ void statement::bind_one(int parameter_id, std::int64_t value)
 {
     const auto status = sqlite3_bind_int64(handle.get(), parameter_id, value);
     if(status != SQLITE_OK) {
-        throw_error(handle.get());
+        throw_error(status);
     }
 }
 
@@ -166,7 +161,7 @@ void statement::bind_one(int parameter_id, span<const std::byte> value)
     const auto status = sqlite3_bind_blob64(handle.get(), parameter_id, value.data(),
         value.size_bytes(), SQLITE_STATIC);
     if(status != SQLITE_OK) {
-        throw_error(handle.get());
+        throw_error(status);
     }
 }
 
@@ -175,7 +170,7 @@ void statement::bind_one(int parameter_id, std::string_view value)
     const auto status = sqlite3_bind_text64(handle.get(), parameter_id, value.data(), value.size(),
         SQLITE_STATIC, SQLITE_UTF8);
     if(status != SQLITE_OK) {
-        throw_error(handle.get());
+        throw_error(status);
     }
 }
 
