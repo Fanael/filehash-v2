@@ -194,15 +194,11 @@ std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
     std::ostream& error_stream)
 {
     struct foreign_key_violation {
-        std::string_view child_table_name;
-        std::optional<std::int64_t> rowid;
-        std::string_view parent_table_name;
-        std::int64_t constraint_id;
-
-        FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::string_column_tag,
-            sqlite::nullable_int_column_tag,
-            sqlite::string_column_tag,
-            sqlite::int_column_tag);
+        FILEHASH_SQLITE_DEFINE_ROW_TYPE(
+            ((sqlite::string_column_tag)(child_table_name))
+            ((sqlite::nullable_int_column_tag)(child_rowid))
+            ((sqlite::string_column_tag)(parent_table_name))
+            ((sqlite::int_column_tag)(constraint_id)));
     };
 
     error_stream << "Running PRAGMA foreign_key_check... " << std::flush;
@@ -217,8 +213,8 @@ std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
         error_stream << "Foreign key constraint failed:\n  Child table: " << row->child_table_name
             << "\n  Parent table: " << row->parent_table_name << "\n  Foreign key ID: "
             << row->constraint_id << "\n  Child table rowid: ";
-        if(row->rowid) {
-            error_stream << *row->rowid;
+        if(row->child_rowid) {
+            error_stream << *row->child_rowid;
         } else {
             error_stream << "(NULL)";
         }
@@ -233,13 +229,10 @@ std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
 std::uint_least64_t check_file_hashes(sqlite::connection& connection, std::ostream& error_stream)
 {
     struct file_row {
-        std::int64_t snapshot_id;
-        std::int64_t path_id;
-        span<const std::byte> hash;
-
-        FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
-            sqlite::int_column_tag,
-            hash_column_tag);
+        FILEHASH_SQLITE_DEFINE_ROW_TYPE(
+            ((sqlite::int_column_tag)(snapshot_id))
+            ((sqlite::int_column_tag)(path_id))
+            ((hash_column_tag)(hash)));
     };
 
     error_stream << "Looking for file hash mismatches... " << std::flush;

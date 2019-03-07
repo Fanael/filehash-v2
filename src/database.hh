@@ -39,53 +39,48 @@ class diff;
 class hash_inserter;
 class mismatched_chunks_cursor;
 class snapshot;
-struct timestamp_column_tag;
-struct hash_column_tag;
+
+struct timestamp_column_tag {
+    using raw_tag = sqlite::blob_column_tag;
+    using column_type = timespec;
+
+    static column_type transform(span<const std::byte> blob);
+};
+
+struct hash_column_tag {
+    using raw_tag = sqlite::blob_column_tag;
+    using column_type = span<const std::byte>;
+
+    static column_type transform(span<const std::byte> blob);
+};
 
 struct snapshot_metadata {
-    std::string_view name;
-    timespec start_time;
-    timespec end_time;
-
-    FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::string_column_tag,
-        timestamp_column_tag,
-        timestamp_column_tag);
+    FILEHASH_SQLITE_DEFINE_ROW_TYPE(
+        ((sqlite::string_column_tag)(name))
+        ((timestamp_column_tag)(start_time))
+        ((timestamp_column_tag)(end_time)));
 };
 
 struct mismatched_file {
-    std::int64_t file_id;
-    std::string_view file_path;
-    timespec modification_time;
-    span<const std::byte> old_hash;
-    span<const std::byte> new_hash;
-
-    FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
-        sqlite::string_column_tag,
-        timestamp_column_tag,
-        hash_column_tag,
-        hash_column_tag);
+    FILEHASH_SQLITE_DEFINE_ROW_TYPE(
+        ((sqlite::int_column_tag)(file_id))
+        ((sqlite::string_column_tag)(file_path))
+        ((timestamp_column_tag)(modification_time))
+        ((hash_column_tag)(old_hash))
+        ((hash_column_tag)(new_hash)));
 };
 
 struct full_diff_mismatched_file {
-    std::int64_t old_snapshot_id;
-    std::int64_t new_snapshot_id;
-    std::string_view old_snapshot_name;
-    std::string_view new_snapshot_name;
-    std::int64_t file_id;
-    std::string_view file_path;
-    timespec modification_time;
-    span<const std::byte> old_hash;
-    span<const std::byte> new_hash;
-
-    FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
-        sqlite::int_column_tag,
-        sqlite::string_column_tag,
-        sqlite::string_column_tag,
-        sqlite::int_column_tag,
-        sqlite::string_column_tag,
-        timestamp_column_tag,
-        hash_column_tag,
-        hash_column_tag);
+    FILEHASH_SQLITE_DEFINE_ROW_TYPE(
+        ((sqlite::int_column_tag)(old_snapshot_id))
+        ((sqlite::int_column_tag)(new_snapshot_id))
+        ((sqlite::string_column_tag)(old_snapshot_name))
+        ((sqlite::string_column_tag)(new_snapshot_name))
+        ((sqlite::int_column_tag)(file_id))
+        ((sqlite::string_column_tag)(file_path))
+        ((timestamp_column_tag)(modification_time))
+        ((hash_column_tag)(old_hash))
+        ((hash_column_tag)(new_hash)));
 };
 
 class database {
@@ -160,15 +155,11 @@ private:
 class diff {
 public:
     struct file_counts {
-        std::int64_t equal_files;
-        std::int64_t modified_files;
-        std::int64_t deleted_files;
-        std::int64_t new_files;
-
-        FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
-            sqlite::int_column_tag,
-            sqlite::int_column_tag,
-            sqlite::int_column_tag);
+        FILEHASH_SQLITE_DEFINE_ROW_TYPE(
+            ((sqlite::int_column_tag)(equal_files))
+            ((sqlite::int_column_tag)(modified_files))
+            ((sqlite::int_column_tag)(deleted_files))
+            ((sqlite::int_column_tag)(new_files)));
     };
 
     file_counts get_file_counts();
@@ -187,13 +178,10 @@ private:
 class mismatched_chunks_cursor {
 public:
     struct row_type {
-        std::int64_t chunk_id;
-        span<const std::byte> old_hash;
-        span<const std::byte> new_hash;
-
-        FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
-            hash_column_tag,
-            hash_column_tag);
+        FILEHASH_SQLITE_DEFINE_ROW_TYPE(
+            ((sqlite::int_column_tag)(chunk_id))
+            ((hash_column_tag)(old_hash))
+            ((hash_column_tag)(new_hash)));
     };
 
     void rewind_to_file(std::int64_t file_id);
@@ -207,20 +195,6 @@ private:
     explicit mismatched_chunks_cursor(database& db);
 
     sqlite::owning_cursor<row_type> cursor;
-};
-
-struct timestamp_column_tag {
-    using raw_tag = sqlite::blob_column_tag;
-    using column_type = timespec;
-
-    static column_type transform(span<const std::byte> blob);
-};
-
-struct hash_column_tag {
-    using raw_tag = sqlite::blob_column_tag;
-    using column_type = span<const std::byte>;
-
-    static column_type transform(span<const std::byte> blob);
 };
 
 } // namespace filehash::db

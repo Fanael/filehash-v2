@@ -32,6 +32,10 @@
 #include <boost/hana/type.hpp>
 #include <boost/hana/unpack.hpp>
 #include <boost/hana/zip_with.hpp>
+#include <boost/preprocessor/seq/elem.hpp>
+#include <boost/preprocessor/seq/enum.hpp>
+#include <boost/preprocessor/seq/for_each.hpp>
+#include <boost/preprocessor/seq/transform.hpp>
 
 struct sqlite3;
 struct sqlite3_stmt;
@@ -80,6 +84,19 @@ constexpr auto row_type_column_tags = decltype(row_type_column_tags_(std::declva
 // NB: maybe_unused to silence some spurious GCC warnings.
 #define FILEHASH_SQLITE_REGISTER_ROW_TYPE(...)\
     using row_type_column_tags [[maybe_unused]] = decltype(::boost::hana::tuple_t<__VA_ARGS__>)
+
+#define FILEHASH_SQLITE_DEFINE_ROW_TYPE(columns_seq)\
+    FILEHASH_SQLITE_DEFINE_ROW_TYPE_COLUMNS(columns_seq)\
+    FILEHASH_SQLITE_REGISTER_ROW_TYPE(BOOST_PP_SEQ_ENUM(\
+        BOOST_PP_SEQ_TRANSFORM(FILEHASH_SQLITE_ROW_TYPE_COLUMN_TAG, _, columns_seq)))
+
+#define FILEHASH_SQLITE_ROW_TYPE_COLUMN_TAG(_d, _x, column_seq) BOOST_PP_SEQ_ELEM(0, column_seq)
+
+#define FILEHASH_SQLITE_DEFINE_ROW_TYPE_COLUMNS(columns_seq)\
+    BOOST_PP_SEQ_FOR_EACH(FILEHASH_SQLITE_DEFINE_ROW_TYPE_COLUMN, _, columns_seq)
+
+#define FILEHASH_SQLITE_DEFINE_ROW_TYPE_COLUMN(_r, _x, column_seq)\
+    BOOST_PP_SEQ_ELEM(0, column_seq)::column_type BOOST_PP_SEQ_ELEM(1, column_seq);
 
 class statement;
 template <typename RowType>
