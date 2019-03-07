@@ -69,7 +69,7 @@ void apply_common_pragmas(sqlite::connection& connection)
 void check_application_id(sqlite::connection& connection)
 {
     auto stmt = connection.prepare("PRAGMA application_id;");
-    const auto id = sqlite::single_column_cursor<sqlite::int_column_tag>(stmt).next_always();
+    const auto id = stmt.get_single_row_always<std::int64_t>();
     if(id != our_application_id) {
         throw error("Not a valid database file, wrong application_id: " + std::to_string(id));
     }
@@ -156,7 +156,7 @@ std::int64_t get_snapshot_id(sqlite::statement& lookup_stmt, std::string_view na
 {
     lookup_stmt.reset();
     lookup_stmt.bind(name);
-    if(const auto id = sqlite::single_column_cursor<sqlite::int_column_tag>(lookup_stmt).next()) {
+    if(const auto id = lookup_stmt.get_single_row<std::int64_t>()) {
         return *id;
     }
     throw error(std::string("no snapshot named \"").append(name).append("\" found"));
@@ -171,7 +171,7 @@ std::uint_least64_t check_sqlite_integrity(sqlite::connection& connection,
     // integrity_check, there's no way to make it return *all* messages.
     // So limit the number of error messages to a thousand, because if
     // a database has more errors than that, it's likely unsalvageable.
-    sqlite::owning_cursor<std::string_view, sqlite::string_column_tag> cursor(
+    sqlite::owning_cursor<std::string_view> cursor(
         connection.prepare("PRAGMA integrity_check(1000);"));
     std::uint_least64_t total_errors = 0;
     while(const auto string = cursor.next()) {
@@ -198,15 +198,16 @@ std::uint_least64_t check_sqlite_foreign_keys(sqlite::connection& connection,
         std::optional<std::int64_t> rowid;
         std::string_view parent_table_name;
         std::int64_t constraint_id;
+
+        FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::string_column_tag,
+            sqlite::nullable_int_column_tag,
+            sqlite::string_column_tag,
+            sqlite::int_column_tag);
     };
-    using cursor_type = sqlite::owning_cursor<foreign_key_violation,
-        sqlite::string_column_tag,
-        sqlite::nullable_int_column_tag,
-        sqlite::string_column_tag,
-        sqlite::int_column_tag>;
 
     error_stream << "Running PRAGMA foreign_key_check... " << std::flush;
-    cursor_type cursor(connection.prepare("PRAGMA foreign_key_check;"));
+    sqlite::owning_cursor<foreign_key_violation> cursor(connection.prepare(
+        "PRAGMA foreign_key_check;"));
     std::uint_least64_t total_errors = 0;
     while(const auto row = cursor.next()) {
         if(total_errors == 0) {
@@ -235,19 +236,18 @@ std::uint_least64_t check_file_hashes(sqlite::connection& connection, std::ostre
         std::int64_t snapshot_id;
         std::int64_t path_id;
         span<const std::byte> hash;
+
+        FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
+            sqlite::int_column_tag,
+            hash_column_tag);
     };
-    using file_cursor_type = sqlite::owning_cursor<file_row,
-        sqlite::int_column_tag,
-        sqlite::int_column_tag,
-        hash_column_tag>;
-    using chunk_hash_cursor_type = sqlite::owning_cursor<span<const std::byte>,
-        sqlite::blob_column_tag>;
 
     error_stream << "Looking for file hash mismatches... " << std::flush;
-    file_cursor_type file_cursor(connection.prepare("SELECT snapshot_id, path_id, hash "
+    sqlite::owning_cursor<file_row> file_cursor(connection.prepare(
+        "SELECT snapshot_id, path_id, hash "
         "FROM snapshot_files "
         "JOIN hashes USING (hash_id);"));
-    chunk_hash_cursor_type file_chunk_cursor(connection.prepare(
+    sqlite::owning_cursor<span<const std::byte>> file_chunk_cursor(connection.prepare(
         "SELECT hash "
         "FROM file_chunks "
         "JOIN hashes USING (hash_id) "
@@ -418,10 +418,10 @@ bool database::remove_snapshot(std::string_view name)
     return connection.change_count() > 0;
 }
 
-snapshot_cursor database::open_snapshot_cursor()
+sqlite::owning_cursor<snapshot_metadata> database::open_snapshot_cursor()
 {
     start_transaction_if_needed();
-    return snapshot_cursor(connection.prepare(
+    return sqlite::owning_cursor<snapshot_metadata>(connection.prepare(
         "SELECT name, start_time, end_time FROM snapshots ORDER BY start_time DESC;"));
 }
 
@@ -434,10 +434,10 @@ diff database::open_diff(std::string_view old_snapshot_name, std::string_view ne
     return diff(old_snapshot_id, new_snapshot_id, *this);
 }
 
-full_diff_mismatched_files_cursor database::open_full_diff()
+sqlite::owning_cursor<full_diff_mismatched_file> database::open_full_diff()
 {
     start_transaction_if_needed();
-    return full_diff_mismatched_files_cursor(connection.prepare(R"eof(
+    return sqlite::owning_cursor<full_diff_mismatched_file>(connection.prepare(R"eof(
 SELECT
   sids.snapshot_id AS old_snapshot_id,
   sids.successor_id AS new_snapshot_id,
@@ -622,14 +622,10 @@ FROM (
   LEFT JOIN snapshot_files AS new_s ON new_s.snapshot_id = ?2 AND old_s.path_id = new_s.path_id
   WHERE old_s.snapshot_id = ?1);)eof");
     stmt.bind(old_snapshot_id, new_snapshot_id);
-    return sqlite::row_cursor<file_counts,
-        sqlite::int_column_tag,
-        sqlite::int_column_tag,
-        sqlite::int_column_tag,
-        sqlite::int_column_tag>(stmt).next_always();
+    return stmt.get_single_row_always<file_counts>();
 }
 
-mismatched_files_cursor diff::open_file_mismatch_cursor()
+sqlite::owning_cursor<mismatched_file> diff::open_file_mismatch_cursor()
 {
     auto stmt = parent->connection.prepare(R"eof(
 SELECT
@@ -649,7 +645,7 @@ JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id
 WHERE old_s.snapshot_id = ?
   AND new_s.snapshot_id = ?;)eof");
     stmt.bind(old_snapshot_id, new_snapshot_id);
-    return mismatched_files_cursor(std::move(stmt));
+    return sqlite::owning_cursor<mismatched_file>(std::move(stmt));
 }
 
 mismatched_chunks_cursor diff::open_chunk_mismatch_cursor()

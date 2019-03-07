@@ -46,12 +46,11 @@ struct snapshot_metadata {
     std::string_view name;
     timespec start_time;
     timespec end_time;
-};
 
-using snapshot_cursor = sqlite::owning_cursor<snapshot_metadata,
-    sqlite::string_column_tag,
-    timestamp_column_tag,
-    timestamp_column_tag>;
+    FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::string_column_tag,
+        timestamp_column_tag,
+        timestamp_column_tag);
+};
 
 struct mismatched_file {
     std::int64_t file_id;
@@ -59,14 +58,13 @@ struct mismatched_file {
     timespec modification_time;
     span<const std::byte> old_hash;
     span<const std::byte> new_hash;
-};
 
-using mismatched_files_cursor = sqlite::owning_cursor<mismatched_file,
-    sqlite::int_column_tag,
-    sqlite::string_column_tag,
-    timestamp_column_tag,
-    hash_column_tag,
-    hash_column_tag>;
+    FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
+        sqlite::string_column_tag,
+        timestamp_column_tag,
+        hash_column_tag,
+        hash_column_tag);
+};
 
 struct full_diff_mismatched_file {
     std::int64_t old_snapshot_id;
@@ -78,18 +76,17 @@ struct full_diff_mismatched_file {
     timespec modification_time;
     span<const std::byte> old_hash;
     span<const std::byte> new_hash;
-};
 
-using full_diff_mismatched_files_cursor = sqlite::owning_cursor<full_diff_mismatched_file,
-    sqlite::int_column_tag,
-    sqlite::int_column_tag,
-    sqlite::string_column_tag,
-    sqlite::string_column_tag,
-    sqlite::int_column_tag,
-    sqlite::string_column_tag,
-    timestamp_column_tag,
-    hash_column_tag,
-    hash_column_tag>;
+    FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
+        sqlite::int_column_tag,
+        sqlite::string_column_tag,
+        sqlite::string_column_tag,
+        sqlite::int_column_tag,
+        sqlite::string_column_tag,
+        timestamp_column_tag,
+        hash_column_tag,
+        hash_column_tag);
+};
 
 class database {
 public:
@@ -107,9 +104,9 @@ public:
     snapshot create_empty_snapshot(std::string_view name);
     snapshot open_snapshot(std::string_view name);
     bool remove_snapshot(std::string_view name);
-    snapshot_cursor open_snapshot_cursor();
+    sqlite::owning_cursor<snapshot_metadata> open_snapshot_cursor();
     diff open_diff(std::string_view old_snapshot_name, std::string_view new_snapshot_name);
-    full_diff_mismatched_files_cursor open_full_diff();
+    sqlite::owning_cursor<full_diff_mismatched_file> open_full_diff();
     mismatched_chunks_cursor open_chunk_mismatch_cursor();
 private:
     friend class diff;
@@ -167,10 +164,15 @@ public:
         std::int64_t modified_files;
         std::int64_t deleted_files;
         std::int64_t new_files;
+
+        FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
+            sqlite::int_column_tag,
+            sqlite::int_column_tag,
+            sqlite::int_column_tag);
     };
 
     file_counts get_file_counts();
-    mismatched_files_cursor open_file_mismatch_cursor();
+    sqlite::owning_cursor<mismatched_file> open_file_mismatch_cursor();
     mismatched_chunks_cursor open_chunk_mismatch_cursor();
 private:
     friend class database;
@@ -188,6 +190,10 @@ public:
         std::int64_t chunk_id;
         span<const std::byte> old_hash;
         span<const std::byte> new_hash;
+
+        FILEHASH_SQLITE_REGISTER_ROW_TYPE(sqlite::int_column_tag,
+            hash_column_tag,
+            hash_column_tag);
     };
 
     void rewind_to_file(std::int64_t file_id);
@@ -200,10 +206,7 @@ private:
 
     explicit mismatched_chunks_cursor(database& db);
 
-    sqlite::owning_cursor<row_type,
-        sqlite::int_column_tag,
-        hash_column_tag,
-        hash_column_tag> cursor;
+    sqlite::owning_cursor<row_type> cursor;
 };
 
 struct timestamp_column_tag {

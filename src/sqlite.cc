@@ -275,11 +275,9 @@ connection::connection(const char* file_name, open_mode mode)
       commit_statement(prepare("COMMIT;")),
       rollback_statement(prepare("ROLLBACK;"))
 {
-    // Check if it's really a new database that we just opened.
     if(mode == open_mode::create_new) {
-        auto stmt = prepare("PRAGMA schema_version;");
-        const auto schema_version = single_column_cursor<int_column_tag>(stmt).next_always();
-        if(schema_version != 0) {
+        // Check if it's really a new database that we just opened.
+        if(prepare("PRAGMA schema_version;").get_single_row_always<std::int64_t>() != 0) {
             throw_error(SQLITE_ERROR, "database already exists");
         }
     }
