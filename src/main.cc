@@ -252,7 +252,7 @@ exit_status run_hashing_workers(db::snapshot& snapshot, const args::common_args&
     workers.reserve(worker_count);
     for(std::size_t i = 0; i < worker_count; ++i) {
         auto& our_inserter = inserters[i];
-        workers.push_back(worker([&]{ hashing_worker(our_inserter, shared); }));
+        workers.emplace_back([&]{ hashing_worker(our_inserter, shared); });
     }
     // Let all workers run to completion before saving their changes, to
     // hopefully reduce the database contention a bit.
