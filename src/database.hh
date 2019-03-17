@@ -99,9 +99,9 @@ public:
     snapshot create_empty_snapshot(std::string_view name);
     snapshot open_snapshot(std::string_view name);
     bool remove_snapshot(std::string_view name);
-    sqlite::owning_cursor<snapshot_metadata> open_snapshot_cursor();
+    sqlite::restricted_owning_cursor<snapshot_metadata> open_snapshot_cursor();
     diff open_diff(std::string_view old_snapshot_name, std::string_view new_snapshot_name);
-    sqlite::owning_cursor<full_diff_mismatched_file> open_full_diff();
+    sqlite::restricted_owning_cursor<full_diff_mismatched_file> open_full_diff();
     mismatched_chunks_cursor open_chunk_mismatch_cursor();
 private:
     friend class diff;
@@ -164,7 +164,7 @@ public:
     };
 
     file_counts get_file_counts();
-    sqlite::owning_cursor<mismatched_file> open_file_mismatch_cursor();
+    sqlite::restricted_owning_cursor<mismatched_file> open_file_mismatch_cursor();
     mismatched_chunks_cursor open_chunk_mismatch_cursor();
 private:
     friend class database;

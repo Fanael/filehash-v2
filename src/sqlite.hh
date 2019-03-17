@@ -176,6 +176,14 @@ private:
     statement stmt;
 };
 
+template <typename RowType>
+class restricted_owning_cursor : private owning_cursor<RowType> {
+public:
+    using owning_cursor<RowType>::owning_cursor;
+    using owning_cursor<RowType>::rewind;
+    using owning_cursor<RowType>::next;
+};
+
 class transaction;
 
 enum class open_mode {

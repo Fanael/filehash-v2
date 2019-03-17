@@ -411,10 +411,10 @@ bool database::remove_snapshot(std::string_view name)
     return connection.change_count() > 0;
 }
 
-sqlite::owning_cursor<snapshot_metadata> database::open_snapshot_cursor()
+sqlite::restricted_owning_cursor<snapshot_metadata> database::open_snapshot_cursor()
 {
     start_transaction_if_needed();
-    return sqlite::owning_cursor<snapshot_metadata>(connection.prepare(
+    return sqlite::restricted_owning_cursor<snapshot_metadata>(connection.prepare(
         "SELECT name, start_time, end_time FROM snapshots ORDER BY start_time DESC;"));
 }
 
@@ -427,10 +427,10 @@ diff database::open_diff(std::string_view old_snapshot_name, std::string_view ne
     return diff(old_snapshot_id, new_snapshot_id, *this);
 }
 
-sqlite::owning_cursor<full_diff_mismatched_file> database::open_full_diff()
+sqlite::restricted_owning_cursor<full_diff_mismatched_file> database::open_full_diff()
 {
     start_transaction_if_needed();
-    return sqlite::owning_cursor<full_diff_mismatched_file>(connection.prepare(R"eof(
+    return sqlite::restricted_owning_cursor<full_diff_mismatched_file>(connection.prepare(R"eof(
 SELECT
   sids.snapshot_id AS old_snapshot_id,
   sids.successor_id AS new_snapshot_id,
@@ -626,7 +626,7 @@ FROM (
     return stmt.get_single_row_always<file_counts>();
 }
 
-sqlite::owning_cursor<mismatched_file> diff::open_file_mismatch_cursor()
+sqlite::restricted_owning_cursor<mismatched_file> diff::open_file_mismatch_cursor()
 {
     auto stmt = parent->connection.prepare(R"eof(
 SELECT
@@ -646,7 +646,7 @@ JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id
 WHERE old_s.snapshot_id = ?
   AND new_s.snapshot_id = ?;)eof");
     stmt.bind(old_snapshot_id, new_snapshot_id);
-    return sqlite::owning_cursor<mismatched_file>(std::move(stmt));
+    return sqlite::restricted_owning_cursor<mismatched_file>(std::move(stmt));
 }
 
 mismatched_chunks_cursor diff::open_chunk_mismatch_cursor()
