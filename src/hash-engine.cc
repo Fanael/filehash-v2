@@ -145,6 +145,7 @@ void hash_engine::reset(file_descriptor& file)
     chunk_id = 0;
     chunk_hash.reset();
     file_hash.reset();
+    inserter->reset_file(file_id);
 }
 
 void hash_engine::try_detect_modifications(const file_watcher::watch& watch)

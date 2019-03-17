@@ -131,6 +131,7 @@ private:
 class hash_inserter {
 public:
     void add_file(std::int64_t file_id, std::string_view path);
+    void reset_file(std::int64_t file_id);
     void add_chunk(std::int64_t file_id, std::int64_t chunk_id,
         const blake2sp4::result_type& chunk_hash);
     void finalize_file(std::int64_t file_id, const timespec& file_modification_time,

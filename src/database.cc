@@ -558,7 +558,7 @@ hash_inserter::hash_inserter(std::string file_name_table_name, std::string file_
     std::string chunk_table_name, std::int64_t snapshot_id, database& db)
     : parent(&db),
       add_chunk_statement(db.connection.prepare(
-          "INSERT OR REPLACE INTO " + chunk_table_name + " VALUES (?, ?, ?)")),
+          "INSERT INTO " + chunk_table_name + " VALUES (?, ?, ?)")),
       add_file_name_statement(db.connection.prepare(
           "INSERT INTO " + file_name_table_name + " VALUES (?, ?)")),
       add_file_data_statement(db.connection.prepare(
@@ -575,6 +575,14 @@ void hash_inserter::add_file(std::int64_t file_id, std::string_view path)
     add_file_name_statement.reset();
     add_file_name_statement.bind(file_id, path);
     add_file_name_statement.step();
+}
+
+void hash_inserter::reset_file(std::int64_t file_id)
+{
+    auto remove_chunks_statement = parent->connection.prepare(
+        "DELETE FROM " + chunk_table_name + " WHERE file_id = ?;");
+    remove_chunks_statement.bind(file_id);
+    remove_chunks_statement.step();
 }
 
 void hash_inserter::add_chunk(std::int64_t file_id, std::int64_t chunk_id,
