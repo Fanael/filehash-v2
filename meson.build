@@ -125,6 +125,7 @@ sources = [
   'src/main.cc',
   'src/sqlite.cc',
   'src/syscall-error.cc',
+  'src/temporary-table.cc',
 ]
 
 conf_data = configuration_data()

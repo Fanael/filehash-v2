@@ -27,6 +27,7 @@
 #include "database.hh"
 #include "span.hh"
 #include "sqlite.hh"
+#include "temporary-table.hh"
 
 namespace filehash::db {
 namespace {
@@ -152,14 +153,21 @@ sqlite::statement make_statement_lookup_statement(sqlite::connection& connection
     return connection.prepare("SELECT snapshot_id FROM snapshots WHERE name = ?;");
 }
 
-std::int64_t get_snapshot_id(sqlite::statement& lookup_stmt, std::string_view name)
+std::optional<std::int64_t> try_get_snapshot_id(sqlite::statement& lookup_stmt,
+    std::string_view name)
 {
     lookup_stmt.reset();
     lookup_stmt.bind(name);
-    if(const auto id = lookup_stmt.get_single_row<std::int64_t>()) {
-        return *id;
+    return lookup_stmt.get_single_row<std::int64_t>();
+}
+
+std::int64_t get_snapshot_id(sqlite::statement& lookup_stmt, std::string_view name)
+{
+    const auto snapshot_id = try_get_snapshot_id(lookup_stmt, name);
+    if(!snapshot_id) {
+        throw error(std::string("no snapshot named \"").append(name).append("\" found"));
     }
-    throw error(std::string("no snapshot named \"").append(name).append("\" found"));
+    return *snapshot_id;
 }
 
 
@@ -395,20 +403,19 @@ snapshot database::create_empty_snapshot(std::string_view name)
     return snapshot(connection.last_insert_rowid(), *this);
 }
 
+std::optional<snapshot> database::try_open_snapshot(std::string_view name)
+{
+    start_transaction_if_needed();
+    auto stmt = make_statement_lookup_statement(connection);
+    const auto snapshot_id = try_get_snapshot_id(stmt, name);
+    return snapshot_id ? std::optional(snapshot(*snapshot_id, *this)) : std::nullopt;
+}
+
 snapshot database::open_snapshot(std::string_view name)
 {
     start_transaction_if_needed();
     auto stmt = make_statement_lookup_statement(connection);
     return snapshot(get_snapshot_id(stmt, name), *this);
-}
-
-bool database::remove_snapshot(std::string_view name)
-{
-    start_transaction_if_needed();
-    auto stmt = connection.prepare("DELETE FROM snapshots WHERE name = ?;");
-    stmt.bind(name);
-    stmt.step();
-    return connection.change_count() > 0;
 }
 
 sqlite::restricted_owning_cursor<snapshot_metadata> database::open_snapshot_cursor()
@@ -467,6 +474,18 @@ mismatched_chunks_cursor database::open_chunk_mismatch_cursor()
 {
     start_transaction_if_needed();
     return mismatched_chunks_cursor(*this);
+}
+
+collection_set database::open_collection_set()
+{
+    start_transaction_if_needed();
+    auto table_guard = sqlite::make_temporary_table(connection,
+        "CREATE TABLE temp.snapshot_collection_set (snapshot_id INTEGER NOT NULL PRIMARY KEY);",
+        "DROP TABLE temp.snapshot_collection_set");
+    auto add_snapshot = connection.prepare("INSERT INTO temp.snapshot_collection_set VALUES (?);");
+    auto remove = connection.prepare("DELETE FROM snapshots WHERE snapshot_id IN ("
+        "SELECT snapshot_id FROM temp.snapshot_collection_set);");
+    return collection_set(std::move(table_guard), std::move(add_snapshot), std::move(remove));
 }
 
 void database::start_transaction_if_needed()
@@ -698,6 +717,28 @@ JOIN hashes AS new_h ON new_s.hash_id = new_h.hash_id
 WHERE old_s.snapshot_id = ?
   AND new_s.snapshot_id = ?
   AND old_s.path_id = ?;)eof"))
+{
+}
+
+
+void collection_set::add_snapshot(snapshot&& snapshot)
+{
+    add_snapshot_statement.reset();
+    add_snapshot_statement.bind(snapshot.id);
+    add_snapshot_statement.step();
+}
+
+void collection_set::remove_snapshots()
+{
+    remove_snapshots_statement.reset();
+    remove_snapshots_statement.step();
+}
+
+collection_set::collection_set(sqlite::temporary_table_guard guard, sqlite::statement add_snapshot,
+    sqlite::statement remove_snapshots) noexcept
+    : table_guard(std::move(guard)),
+      add_snapshot_statement(std::move(add_snapshot)),
+      remove_snapshots_statement(std::move(remove_snapshots))
 {
 }
 

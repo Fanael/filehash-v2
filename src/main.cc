@@ -410,12 +410,21 @@ exit_status run_command(const args::new_empty_command& args, const args::common_
 exit_status run_command(const args::remove_command& args, const args::common_args&)
 {
     db::database database(args.database_path);
-    if(!database.remove_snapshot(args.snapshot_name)) {
-        std::clog << "Snapshot named " << args.snapshot_name << " not found, nothing removed.\n";
-        return exit_status::harmless_error;
+    auto collection_set = database.open_collection_set();
+    bool all_snapshots_found = true;
+    for(const auto& snapshot_name: args.snapshot_names) {
+        auto snapshot = database.try_open_snapshot(snapshot_name);
+        if(!snapshot) {
+            all_snapshots_found = false;
+            std::clog << "Warning: no snapshot named \"" << snapshot_name
+                << "\" found, skipping.\n";
+            continue;
+        }
+        collection_set.add_snapshot(*std::move(snapshot));
     }
+    collection_set.remove_snapshots();
     database.save_changes();
-    return exit_status::success;
+    return all_snapshots_found ? exit_status::success : exit_status::harmless_error;
 }
 
 exit_status run_command(const args::update_command& args, const args::common_args& common_args)

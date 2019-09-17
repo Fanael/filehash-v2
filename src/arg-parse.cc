@@ -316,14 +316,14 @@ command command_parser_impl<T, Fields...>::parse(command_cookie cookie,
 template <auto Field>
 struct string_arg {
     template <typename T>
-    static span<const std::string_view> parse(command_cookie cookie,
-        T& result, span<const std::string_view> args);
+    static span<const std::string_view> parse(command_cookie cookie, T& result,
+        span<const std::string_view> args);
 };
 
 template <auto Field>
 template <typename T>
-span<const std::string_view> string_arg<Field>::parse(command_cookie cookie,
-    T& result, span<const std::string_view> args)
+span<const std::string_view> string_arg<Field>::parse(command_cookie cookie, T& result,
+    span<const std::string_view> args)
 {
     if(args.empty()) {
         throw missing_argument(cookie);
@@ -355,6 +355,22 @@ span<const std::string_view> command_name_opt_arg<Field>::parse(command_cookie, 
     }
     (result.*Field) = command_to_cookie(*command);
     return args.drop_first(1);
+}
+
+template <auto Field>
+struct remaining_strings_arg {
+    template <typename T>
+    static span<const std::string_view> parse(command_cookie, T& result,
+        span<const std::string_view> args);
+};
+
+template <auto Field>
+template <typename T>
+span<const std::string_view> remaining_strings_arg<Field>::parse(command_cookie, T& result,
+        span<const std::string_view> args)
+{
+    (result.*Field) = args;
+    return args.drop_first(args.size());
 }
 
 constexpr command_spec command_specs[] = {
@@ -529,14 +545,14 @@ If a snapshot with the given name already exists, the command will fail.)eof"
         "remove",
         command_parser_impl<remove_command,
             string_arg<&remove_command::database_path>,
-            string_arg<&remove_command::snapshot_name>>::parse,
-        "<DATABASE-PATH> <SNAPSHOT-NAME>",
-        "Remove a snapshot with the given name",
-        R"eof(Remove a snapshot with the give name from the specified database.
+            remaining_strings_arg<&remove_command::snapshot_names>>::parse,
+        "<DATABASE-PATH> <SNAPSHOT-NAME>...",
+        "Remove snapshot with the given names",
+        R"eof(Remove all snapshot with the give names from the specified database.
 
-If there's no snapshot with the given name, the command will fail, but that
-condition can be distinguished from other errors with the exit code, see
-'--help'.
+If one or of the names refers to a non-existent snapshot, the command will
+fail, but that condition can be distinguished from other errors with the exit
+code, see '--help'.
 
 This command doesn't by itself free any disk space, it only marks file space
 as available for reuse. See the 'gc' command for how reclaim that space.)eof"

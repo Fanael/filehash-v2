@@ -143,6 +143,11 @@ void check_column_for_null(sqlite3_stmt* statement, int column_id)
 
 } // unnamed namespace
 
+bool statement::is_moved_from() const noexcept
+{
+    return handle.get() == nullptr;
+}
+
 void statement::reset() noexcept
 {
     sqlite3_reset(handle.get());

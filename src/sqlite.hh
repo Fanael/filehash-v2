@@ -119,6 +119,8 @@ private:
 
 class statement {
 public:
+    bool is_moved_from() const noexcept;
+
     void reset() noexcept;
     bool step();
     // Note that blobs and strings must live at least until the call to step.

@@ -21,11 +21,9 @@
 #include <iosfwd>
 #include <string_view>
 #include <variant>
+#include "span.hh"
 
 namespace filehash {
-
-template <typename T>
-class span;
 
 namespace args {
 
@@ -101,7 +99,7 @@ struct new_empty_command {
 
 struct remove_command {
     std::string_view database_path;
-    std::string_view snapshot_name;
+    span<const std::string_view> snapshot_names;
 };
 
 struct update_command {

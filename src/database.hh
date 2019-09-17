@@ -26,6 +26,7 @@
 #include "blake2sp4.hh"
 #include "span.hh"
 #include "sqlite.hh"
+#include "temporary-table.hh"
 
 struct timespec;
 
@@ -35,6 +36,7 @@ class error final : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+class collection_set;
 class diff;
 class hash_inserter;
 class mismatched_chunks_cursor;
@@ -97,12 +99,13 @@ public:
     void vacuum();
     std::uint_least64_t integrity_check(std::ostream& error_stream);
     snapshot create_empty_snapshot(std::string_view name);
+    std::optional<snapshot> try_open_snapshot(std::string_view name);
     snapshot open_snapshot(std::string_view name);
-    bool remove_snapshot(std::string_view name);
     sqlite::restricted_owning_cursor<snapshot_metadata> open_snapshot_cursor();
     diff open_diff(std::string_view old_snapshot_name, std::string_view new_snapshot_name);
     sqlite::restricted_owning_cursor<full_diff_mismatched_file> open_full_diff();
     mismatched_chunks_cursor open_chunk_mismatch_cursor();
+    collection_set open_collection_set();
 private:
     friend class diff;
     friend class hash_inserter;
@@ -121,6 +124,7 @@ public:
     void update_end_time();
 private:
     friend class database;
+    friend class collection_set;
 
     explicit snapshot(std::int64_t id, database& db) noexcept;
 
@@ -196,6 +200,21 @@ private:
     explicit mismatched_chunks_cursor(database& db);
 
     sqlite::owning_cursor<row_type> cursor;
+};
+
+class collection_set {
+public:
+    void add_snapshot(snapshot&& snapshot);
+    void remove_snapshots();
+private:
+    friend class database;
+
+    explicit collection_set(sqlite::temporary_table_guard guard, sqlite::statement add_snapshot,
+        sqlite::statement remove_snapshots) noexcept;
+
+    sqlite::temporary_table_guard table_guard;
+    sqlite::statement add_snapshot_statement;
+    sqlite::statement remove_snapshots_statement;
 };
 
 } // namespace filehash::db
