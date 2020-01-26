@@ -1,4 +1,4 @@
-# Copyright 2019 Fanael Linithien
+# Copyright 2019-2020 Fanael Linithien
 #
 # This file is part of filehash-v2.
 #
