@@ -20,13 +20,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string_view>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -196,41 +196,6 @@ std::size_t get_thread_count(std::size_t requested_count) noexcept
     return 2;
 }
 
-// std::future<void> and std::async would do the same thing, but they bloat
-// the binary too much.
-class worker {
-public:
-    template <typename F, typename = std::enable_if_t<!std::is_same_v<worker, std::decay_t<F>>>>
-    explicit worker(F&& function);
-
-    void join();
-private:
-    // Allocate it separately so that its address is stable.
-    std::unique_ptr<std::exception_ptr> exception_ptr;
-    std::thread thread;
-};
-
-template <typename F, typename>
-worker::worker(F&& function)
-    : exception_ptr(std::make_unique<std::exception_ptr>()),
-      thread([excptr = exception_ptr.get(), func = std::forward<F>(function)]() mutable {
-          try {
-              func();
-          } catch(...) {
-              *excptr = std::current_exception();
-          }
-      })
-{
-}
-
-void worker::join()
-{
-    thread.join();
-    if(*exception_ptr != nullptr) {
-        std::rethrow_exception(*exception_ptr);
-    }
-}
-
 file_watcher_factory get_file_watcher_factory(const args::common_args& common_args)
 {
     return common_args.use_watcher ? make_system_watcher : make_dummy_watcher;
@@ -248,16 +213,17 @@ exit_status run_hashing_workers(db::snapshot& snapshot, const args::common_args&
     }
 
     const shared_state shared(common_args.verbose, get_file_watcher_factory(common_args));
-    std::vector<worker> workers;
+    std::vector<std::future<void>> workers;
     workers.reserve(worker_count);
     for(std::size_t i = 0; i < worker_count; ++i) {
         auto& our_inserter = inserters[i];
-        workers.emplace_back([&]{ hashing_worker(our_inserter, shared); });
+        workers.emplace_back(std::async(std::launch::async,
+            [&]{ hashing_worker(our_inserter, shared); }));
     }
     // Let all workers run to completion before saving their changes, to
     // hopefully reduce the database contention a bit.
     for(auto& worker: workers) {
-        worker.join();
+        worker.get();
     }
 
     snapshot.update_end_time();
